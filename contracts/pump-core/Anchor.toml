@@ -1,0 +1,36 @@
+вс[toolchain]
+
+[features]
+seeds = true
+skip-lint = false
+resolution = true
+
+[programs.localnet]
+pump_core = "7wUQXRQtBzTmyp9kcrmok9FKcc4RSYXxPYN9FGDLnqxb"
+
+[programs.devnet]
+pump_core = "7wUQXRQtBzTmyp9kcrmok9FKcc4RSYXxPYN9FGDLnqxb"
+
+[programs.mainnet]
+pump_core = "7wUQXRQtBzTmyp9kcrmok9FKcc4RSYXxPYN9FGDLnqxb"
+
+[registry]
+url = "https://api.devnet.solana.com"
+
+[provider]
+cluster = "Devnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+build = "anchor build"
+deploy = "anchor deploy"
+lint = "anchor verify"
+
+[test]
+startup_wait = 10000
+shutdown_wait = 2000
+upgradeable = false
+
+[workspace]
+types = "target/types"
