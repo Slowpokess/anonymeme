@@ -1,10 +1,15 @@
 // contracts/pump-core/programs/pump-core/src/instructions/create_token.rs
 
 use anchor_lang::prelude::*;
+use anchor_lang::system_program;
 use anchor_spl::{
     token::{self, Mint, Token, TokenAccount, MintTo},
-    metadata::{create_metadata_accounts_v3, CreateMetadataAccountsV3, Metadata},
     associated_token::AssociatedToken,
+};
+use mpl_token_metadata::{
+    ID as TokenMetadataProgramID,
+    state::DataV2,
+    instruction::create_metadata_accounts_v3,
 };
 use crate::state::*;
 use crate::errors::CustomError;
@@ -30,11 +35,12 @@ pub struct CreateToken<'info> {
     )]
     pub mint: Account<'info, Mint>,
 
-    /// CHECK: This is the bonding curve vault that will hold SOL
+    /// Bonding curve vault that will hold SOL - properly validated PDA
     #[account(
         mut,
         seeds = [b"bonding_curve_vault", mint.key().as_ref()],
-        bump
+        bump,
+        constraint = bonding_curve_vault.owner == &system_program::ID @ CustomError::InvalidAccount
     )]
     pub bonding_curve_vault: AccountInfo<'info>,
 
@@ -71,21 +77,25 @@ pub struct CreateToken<'info> {
 
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
-    pub token_metadata_program: Program<'info, Metadata>,
+    /// CHECK: Token Metadata Program
+    #[account(constraint = token_metadata_program.key() == TokenMetadataProgramID)]
+    pub token_metadata_program: AccountInfo<'info>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
 }
+
+
 
 pub fn create_token(
     ctx: Context<CreateToken>,
     name: String,
     symbol: String,
     uri: String,
-    bonding_curve_params: BondingCurveParams,
+    bonding_curve_params: crate::state::BondingCurveParams,
 ) -> Result<()> {
     let clock = Clock::get()?;
     
-    // Validation
+    // Быстрая валидация с ранним выходом
     require!(!ctx.accounts.platform_config.paused, CustomError::PlatformPaused);
     require!(name.len() <= 50, CustomError::NameTooLong);
     require!(symbol.len() <= 10, CustomError::SymbolTooLong);
@@ -93,13 +103,27 @@ pub fn create_token(
     
     // Anti-spam: Check user's last token creation time
     let user_profile = &mut ctx.accounts.user_profile;
+    let security_params = &ctx.accounts.platform_config.security_params;
+    
     if user_profile.last_token_creation > 0 {
         let time_since_last = clock.unix_timestamp - user_profile.last_token_creation;
         require!(
-            time_since_last >= 300, // 5 minutes minimum
+            time_since_last >= security_params.creation_cooldown.max(300), // Minimum 5 minutes
             CustomError::SpamProtection
         );
     }
+    
+    // Check maximum tokens per creator
+    require!(
+        user_profile.tokens_created < security_params.max_tokens_per_creator,
+        CustomError::TooManyTokensCreated
+    );
+    
+    // Check minimum reputation requirement
+    require!(
+        user_profile.reputation_score >= security_params.min_reputation_to_create,
+        CustomError::InsufficientReputation
+    );
 
     // Validate bonding curve parameters
     require!(
@@ -119,12 +143,13 @@ pub fn create_token(
     token_info.symbol = symbol.clone();
     token_info.uri = uri.clone();
     token_info.bonding_curve = BondingCurve {
-        curve_type: bonding_curve_params.curve_type,
+        curve_type: bonding_curve_params.curve_type.clone(),
         initial_price: bonding_curve_params.initial_price,
         current_price: bonding_curve_params.initial_price,
         graduation_threshold: bonding_curve_params.graduation_threshold,
         slope: bonding_curve_params.slope,
         volatility_damper: bonding_curve_params.volatility_damper.unwrap_or(1.0),
+        initial_supply: bonding_curve_params.initial_supply,
     };
     token_info.sol_reserves = 0;
     token_info.token_reserves = bonding_curve_params.initial_supply;
@@ -175,34 +200,52 @@ pub fn create_token(
         bonding_curve_params.initial_supply,
     )?;
 
-    // Create metadata account
-    let metadata_ctx = CpiContext::new(
-        ctx.accounts.token_metadata_program.to_account_info(),
-        CreateMetadataAccountsV3 {
-            metadata: ctx.accounts.metadata_account.to_account_info(),
-            mint: ctx.accounts.mint.to_account_info(),
-            mint_authority: ctx.accounts.bonding_curve_vault.to_account_info(),
-            update_authority: ctx.accounts.bonding_curve_vault.to_account_info(),
-            payer: ctx.accounts.creator.to_account_info(),
-            system_program: ctx.accounts.system_program.to_account_info(),
-            rent: ctx.accounts.rent.to_account_info(),
-        },
+    // Создаем metadata аккаунт через CPI в mpl-token-metadata v1.13.2
+    let metadata_accounts = vec![
+        ctx.accounts.metadata_account.to_account_info(),
+        ctx.accounts.mint.to_account_info(),
+        ctx.accounts.bonding_curve_vault.to_account_info(), // mint_authority
+        ctx.accounts.creator.to_account_info(), // payer
+        ctx.accounts.bonding_curve_vault.to_account_info(), // update_authority
+        ctx.accounts.system_program.to_account_info(),
+        ctx.accounts.rent.to_account_info(),
+    ];
+
+    let metadata_data = DataV2 {
+        name: name.clone(),
+        symbol: symbol.clone(),
+        uri: uri.clone(),
+        seller_fee_basis_points: 0,
+        creators: None,
+        collection: None,
+        uses: None,
+    };
+
+    // Создаем CPI инструкцию для metadata с правильными аргументами для v1.13.2
+    let create_metadata_ix = create_metadata_accounts_v3(
+        ctx.accounts.token_metadata_program.key(),  // program_id
+        ctx.accounts.metadata_account.key(),        // metadata_account
+        ctx.accounts.mint.key(),                    // mint
+        ctx.accounts.bonding_curve_vault.key(),     // mint_authority
+        ctx.accounts.creator.key(),                 // payer
+        ctx.accounts.bonding_curve_vault.key(),     // update_authority
+        metadata_data.name,                         // name
+        metadata_data.symbol,                       // symbol  
+        metadata_data.uri,                          // uri
+        metadata_data.creators,                     // creators
+        metadata_data.seller_fee_basis_points,      // seller_fee_basis_points
+        true,                                       // update_authority_is_signer
+        false,                                      // is_mutable
+        metadata_data.collection,                   // collection
+        metadata_data.uses,                         // uses
+        None,                                       // collection_details
     );
 
-    create_metadata_accounts_v3(
-        metadata_ctx.with_signer(vault_signer),
-        mpl_token_metadata::state::DataV2 {
-            name: name.clone(),
-            symbol: symbol.clone(),
-            uri: uri.clone(),
-            seller_fee_basis_points: 0,
-            creators: None,
-            collection: None,
-            uses: None,
-        },
-        false, // is_mutable
-        true,  // update_authority_is_signer
-        None,  // collection_details
+    // Выполняем CPI вызов для создания metadata
+    anchor_lang::solana_program::program::invoke_signed(
+        &create_metadata_ix,
+        &metadata_accounts,
+        &[&vault_seeds[..]],
     )?;
 
     // Update platform stats
@@ -217,6 +260,7 @@ pub fn create_token(
         symbol,
         initial_supply: bonding_curve_params.initial_supply,
         initial_price: bonding_curve_params.initial_price,
+        curve_type: bonding_curve_params.curve_type,
         timestamp: clock.unix_timestamp,
     });
 
@@ -229,26 +273,4 @@ pub fn create_token(
     );
 
     Ok(())
-}
-
-// Helper struct for bonding curve parameters
-#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
-pub struct BondingCurveParams {
-    pub curve_type: CurveType,
-    pub initial_supply: u64,              // Initial token supply (e.g., 1,000,000,000)
-    pub initial_price: u64,               // Initial price in lamports per token
-    pub graduation_threshold: u64,        // Market cap threshold for DEX listing
-    pub slope: f64,                       // Price increase rate
-    pub volatility_damper: Option<f64>,   // Optional volatility control
-}
-
-#[event]
-pub struct TokenCreated {
-    pub token: Pubkey,
-    pub creator: Pubkey,
-    pub name: String,
-    pub symbol: String,
-    pub initial_supply: u64,
-    pub initial_price: u64,
-    pub timestamp: i64,
 }

@@ -1,4 +1,4 @@
-вс[toolchain]
+[toolchain]
 
 [features]
 seeds = true

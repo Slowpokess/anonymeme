@@ -42,7 +42,8 @@ export function initialize(
     },
     buffer
   )
-  const data = Buffer.concat([identifier, buffer]).slice(0, 8 + len)
+  const dataArray = new Uint8Array([...identifier, ...buffer.subarray(0, len)])
+  const data = Buffer.from(dataArray)
   const ix = new TransactionInstruction({ keys, programId, data })
   return ix
 }

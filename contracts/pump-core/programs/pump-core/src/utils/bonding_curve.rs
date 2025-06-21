@@ -4,6 +4,43 @@ use anchor_lang::prelude::*;
 use crate::state::{BondingCurve, CurveType};
 use crate::errors::CustomError;
 
+/// Кэш для часто используемых математических констант
+const SQRT_2PI: f64 = 2.5066282746310005024157652848110452530069867406099383166299235763;
+const LN_2: f64 = 0.6931471805599453094172321214581765680755001343602552541206800094;
+const E: f64 = 2.7182818284590452353602874713526624977572470936999595749669676277;
+
+/// Быстрое приближение для exp(x) при малых x
+#[inline]
+fn fast_exp_small(x: f64) -> f64 {
+    if x.abs() < 0.001 {
+        // Приближение Тейлора: e^x ≈ 1 + x + x²/2 + x³/6
+        1.0 + x + (x * x * 0.5) + (x * x * x / 6.0)
+    } else {
+        x.exp()
+    }
+}
+
+/// Быстрое приближение для ln(x) при x близком к 1
+#[inline]
+fn fast_ln_near_one(x: f64) -> f64 {
+    if (x - 1.0).abs() < 0.1 {
+        // Приближение: ln(1+y) ≈ y - y²/2 + y³/3 для малых y
+        let y = x - 1.0;
+        y - (y * y * 0.5) + (y * y * y / 3.0)
+    } else {
+        x.ln()
+    }
+}
+
+/// Оптимизированное вычисление квадратного корня с проверкой
+#[inline]
+fn safe_sqrt(x: f64) -> Result<f64> {
+    if x < 0.0 {
+        return Err(CustomError::SqrtNegativeNumber.into());
+    }
+    Ok(x.sqrt())
+}
+
 /// Calculate the amount of tokens to receive when buying with SOL
 pub fn calculate_buy_amount(
     curve: &BondingCurve,
@@ -96,7 +133,7 @@ pub fn calculate_current_price(
     }
 }
 
-/// Calculate market capitalization
+/// Calculate market capitalization with overflow protection
 pub fn calculate_market_cap(
     curve: &BondingCurve,
     current_sol_reserves: u64,
@@ -105,10 +142,20 @@ pub fn calculate_market_cap(
 ) -> Result<u64> {
     let current_price = calculate_current_price(curve, current_sol_reserves, current_token_reserves)?;
     
-    // Market cap = current_price * circulating_supply
+    // Market cap = current_price * circulating_supply  
     let circulating_supply = total_supply.saturating_sub(current_token_reserves);
-    let market_cap = (current_price as u128)
-        .saturating_mul(circulating_supply as u128) / 1_000_000_000; // Adjust for decimals
+    
+    // Use checked arithmetic to prevent overflow
+    let price_u128 = current_price as u128;
+    let supply_u128 = circulating_supply as u128;
+    
+    let market_cap_raw = price_u128
+        .checked_mul(supply_u128)
+        .ok_or(CustomError::OverflowOrUnderflowOccurred)?;
+    
+    let market_cap = market_cap_raw
+        .checked_div(1_000_000_000) // Adjust for decimals
+        .ok_or(CustomError::OverflowOrUnderflowOccurred)?;
     
     Ok(market_cap.min(u64::MAX as u128) as u64)
 }
@@ -118,7 +165,7 @@ pub fn calculate_market_cap(
 
 fn calculate_linear_buy(
     curve: &BondingCurve,
-    current_sol_reserves: u64,
+    _current_sol_reserves: u64,
     current_token_reserves: u64,
     sol_amount: u64,
 ) -> Result<u64> {
@@ -311,16 +358,61 @@ fn calculate_sigmoid_price(
 // === CONSTANT PRODUCT BONDING CURVE ===
 // AMM-style: x * y = k (where x = SOL, y = tokens)
 
+/// Оптимизированная версия constant product с предварительными проверками
 fn calculate_constant_product_buy(
     current_sol_reserves: u64,
     current_token_reserves: u64,
     sol_amount: u64,
 ) -> Result<u64> {
+    // Быстрые предварительные проверки
     require!(current_sol_reserves > 0 && current_token_reserves > 0, CustomError::InsufficientLiquidity);
+    require!(sol_amount > 0, CustomError::InvalidAmount);
     
+    // Проверка на потенциальный overflow перед вычислениями
+    if current_sol_reserves > u64::MAX / 2 || current_token_reserves > u64::MAX / 2 {
+        // Для очень больших значений используем более медленный, но безопасный путь
+        return calculate_constant_product_buy_safe(current_sol_reserves, current_token_reserves, sol_amount);
+    }
+    
+    // Быстрый путь для обычных значений
     let k = (current_sol_reserves as u128) * (current_token_reserves as u128);
     let new_sol_reserves = current_sol_reserves + sol_amount;
+    
+    // Оптимизация: избегаем деления если возможно
+    if new_sol_reserves == current_sol_reserves {
+        return Ok(0); // Нулевая покупка
+    }
+    
     let new_token_reserves = k / (new_sol_reserves as u128);
+    
+    // Проверка валидности результата
+    require!(new_token_reserves <= current_token_reserves as u128, CustomError::InsufficientLiquidity);
+    
+    let tokens_to_receive = current_token_reserves - (new_token_reserves as u64);
+    
+    Ok(tokens_to_receive)
+}
+
+/// Безопасная версия для очень больших значений
+fn calculate_constant_product_buy_safe(
+    current_sol_reserves: u64,
+    current_token_reserves: u64,
+    sol_amount: u64,
+) -> Result<u64> {
+    // Use checked arithmetic for all operations
+    let k = (current_sol_reserves as u128)
+        .checked_mul(current_token_reserves as u128)
+        .ok_or(CustomError::OverflowOrUnderflowOccurred)?;
+    
+    let new_sol_reserves = current_sol_reserves
+        .checked_add(sol_amount)
+        .ok_or(CustomError::OverflowOrUnderflowOccurred)?;
+    
+    let new_token_reserves = k
+        .checked_div(new_sol_reserves as u128)
+        .ok_or(CustomError::InsufficientLiquidity)?;
+    
+    require!(new_token_reserves <= current_token_reserves as u128, CustomError::InsufficientLiquidity);
     
     let tokens_to_receive = current_token_reserves.saturating_sub(new_token_reserves as u64);
     
@@ -333,10 +425,24 @@ fn calculate_constant_product_sell(
     token_amount: u64,
 ) -> Result<u64> {
     require!(current_sol_reserves > 0 && current_token_reserves > 0, CustomError::InsufficientLiquidity);
+    require!(token_amount > 0, CustomError::InvalidAmount);
     
-    let k = (current_sol_reserves as u128) * (current_token_reserves as u128);
-    let new_token_reserves = current_token_reserves + token_amount;
-    let new_sol_reserves = k / (new_token_reserves as u128);
+    // Use checked arithmetic for all operations
+    let k = (current_sol_reserves as u128)
+        .checked_mul(current_token_reserves as u128)
+        .ok_or(CustomError::OverflowOrUnderflowOccurred)?;
+    
+    let new_token_reserves = current_token_reserves
+        .checked_add(token_amount)
+        .ok_or(CustomError::OverflowOrUnderflowOccurred)?;
+    
+    require!(new_token_reserves > 0, CustomError::InsufficientLiquidity);
+    
+    let new_sol_reserves = k
+        .checked_div(new_token_reserves as u128)
+        .ok_or(CustomError::InsufficientLiquidity)?;
+    
+    require!(new_sol_reserves <= current_sol_reserves as u128, CustomError::InsufficientLiquidity);
     
     let sol_to_receive = current_sol_reserves.saturating_sub(new_sol_reserves as u64);
     

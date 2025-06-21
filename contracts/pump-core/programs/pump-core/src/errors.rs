@@ -61,7 +61,7 @@ pub enum CustomError {
     InsufficientReputation, // 6107
 
     #[msg("Maximum tokens per creator exceeded")]
-    MaxTokensPerCreatorExceeded, // 6108
+    TooManyTokensCreated, // 6108
 
     #[msg("Invalid initial supply")]
     InvalidInitialSupply, // 6109
@@ -489,7 +489,6 @@ pub enum ErrorPriority {
 }
 
 // Вспомогательные макросы для быстрого создания ошибок с контекстом
-#[macro_export]
 macro_rules! require_gte {
     ($left:expr, $right:expr, $error:expr) => {
         if $left < $right {
@@ -498,7 +497,6 @@ macro_rules! require_gte {
     };
 }
 
-#[macro_export]
 macro_rules! require_lte {
     ($left:expr, $right:expr, $error:expr) => {
         if $left > $right {
@@ -507,7 +505,6 @@ macro_rules! require_lte {
     };
 }
 
-#[macro_export]
 macro_rules! require_gt {
     ($left:expr, $right:expr, $error:expr) => {
         if $left <= $right {
@@ -516,7 +513,6 @@ macro_rules! require_gt {
     };
 }
 
-#[macro_export]
 macro_rules! require_lt {
     ($left:expr, $right:expr, $error:expr) => {
         if $left >= $right {
@@ -525,7 +521,6 @@ macro_rules! require_lt {
     };
 }
 
-#[macro_export]
 macro_rules! require_not_zero {
     ($value:expr, $error:expr) => {
         if $value == 0 {
@@ -534,7 +529,6 @@ macro_rules! require_not_zero {
     };
 }
 
-#[macro_export]
 macro_rules! require_non_empty {
     ($string:expr, $error:expr) => {
         if $string.trim().is_empty() {
@@ -582,3 +576,4 @@ mod tests {
         assert!(!CustomError::TradingTooFast.should_log());
     }
 }
+

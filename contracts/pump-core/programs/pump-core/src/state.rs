@@ -17,6 +17,7 @@ pub struct PlatformConfig {
     pub min_initial_liquidity: u64,         // Мин начальная ликвидность
     pub platform_version: u8,              // Версия платформы
     pub emergency_contacts: [Pubkey; 3],    // Экстренные контакты
+    pub trading_locked: bool,                // Флаг для защиты от reentrancy
     pub bump: u8,
 }
 
@@ -89,8 +90,19 @@ pub struct BondingCurve {
     pub initial_supply: u64,                // Начальное предложение для кривой
 }
 
+// 🎯 Параметры для создания бондинг-кривой (используется в инструкциях)
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct BondingCurveParams {
+    pub curve_type: CurveType,              // Тип кривой
+    pub initial_supply: u64,                // Начальное предложение
+    pub initial_price: u64,                 // Начальная цена
+    pub graduation_threshold: u64,          // Порог для листинга
+    pub slope: f64,                         // Наклон кривой
+    pub volatility_damper: Option<f64>,     // Демпфер волатильности (опционально)
+}
+
 // 📊 Типы бондинг-кривых
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Debug)]
 pub enum CurveType {
     Linear,                                 // y = mx + b
     Exponential,                            // y = ae^(bx)
@@ -198,7 +210,7 @@ pub struct Achievement {
 }
 
 // 📋 Типы DEX для листинга
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Debug)]
 pub enum DexType {
     Raydium,
     Jupiter,
@@ -209,7 +221,7 @@ pub enum DexType {
 }
 
 // 🚨 Типы отчетов о подозрительной активности
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Debug)]
 pub enum ReportReason {
     Spam,
     Scam,
@@ -266,7 +278,7 @@ pub struct PriceHistory {
     pub bump: u8,
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Debug)]
 pub enum PricePeriod {
     OneMinute,
     FiveMinutes,
@@ -333,7 +345,15 @@ pub struct EmergencyAction {
 // 🔧 Константы и размеры аккаунтов
 impl PlatformConfig {
     pub const SEED: &'static str = "platform_config";
-    pub const ACCOUNT_SIZE: usize = 8 + 32 + 32 + 8 + 1 + 8 + 8 + 8 + 200 + 8 + 8 + 1 + 96 + 1;
+    pub const ACCOUNT_SIZE: usize = 8 + // discriminator
+        32 + 32 + // admin + treasury
+        8 + 1 + // fee_rate + paused
+        8 + 8 + 8 + // counters
+        200 + // security_params (estimated)
+        8 + 8 + 1 + // graduation_fee + min_initial_liquidity + platform_version
+        96 + // emergency_contacts
+        1 + // trading_locked
+        1; // bump
 }
 
 impl TokenInfo {

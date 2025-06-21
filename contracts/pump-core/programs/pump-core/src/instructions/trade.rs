@@ -86,9 +86,13 @@ pub fn buy_tokens(
     
     // Validations
     require!(!ctx.accounts.platform_config.paused, CustomError::PlatformPaused);
+    require!(!ctx.accounts.platform_config.trading_locked, CustomError::PlatformPaused); // Reentrancy protection
     require!(!ctx.accounts.token_info.graduated, CustomError::TokenAlreadyGraduated);
     require!(sol_amount > 0, CustomError::InvalidAmount);
     require!(slippage_tolerance <= 10000, CustomError::InvalidSlippage); // Max 100%
+    
+    // Lock trading to prevent reentrancy
+    ctx.accounts.platform_config.trading_locked = true;
 
     // Security checks
     let security_params = &ctx.accounts.platform_config.security_params;
@@ -113,38 +117,38 @@ pub fn buy_tokens(
 
     // Calculate tokens to receive based on bonding curve
     let token_info = &mut ctx.accounts.token_info;
+    
+    // Кэшируем часто используемые значения
+    let current_sol_reserves = token_info.sol_reserves;
+    let current_token_reserves = token_info.token_reserves;
+    let curve = &token_info.bonding_curve;
+    
     let tokens_to_receive = calculate_buy_amount(
-        &token_info.bonding_curve,
-        token_info.sol_reserves,
-        token_info.token_reserves,
+        curve,
+        current_sol_reserves,
+        current_token_reserves,
         sol_amount_after_fee,
     )?;
 
-    // Check slippage
-    require!(
-        tokens_to_receive >= min_tokens_out,
-        CustomError::SlippageExceeded
-    );
+    // Проверяем slippage и ликвидность
+    require!(tokens_to_receive >= min_tokens_out, CustomError::SlippageExceeded);
+    require!(tokens_to_receive <= current_token_reserves, CustomError::InsufficientLiquidity);
 
-    // Check if there are enough tokens in the curve
-    require!(
-        tokens_to_receive <= token_info.token_reserves,
-        CustomError::InsufficientLiquidity
-    );
+    // Предвычисляем новые резервы для использования в нескольких местах
+    let new_sol_reserves = current_sol_reserves.saturating_add(sol_amount_after_fee);
+    let new_token_reserves = current_token_reserves.saturating_sub(tokens_to_receive);
+    let new_price = calculate_current_price(curve, new_sol_reserves, new_token_reserves)?;
 
-    // Calculate new price after trade
-    let new_sol_reserves = token_info.sol_reserves.saturating_add(sol_amount_after_fee);
-    let new_token_reserves = token_info.token_reserves.saturating_sub(tokens_to_receive);
-    let new_price = calculate_current_price(
-        &token_info.bonding_curve,
-        new_sol_reserves,
-        new_token_reserves,
-    )?;
-
-    // Whale protection: check price impact
-    let price_impact = if token_info.bonding_curve.current_price > 0 {
-        ((new_price as f64 - token_info.bonding_curve.current_price as f64) / 
-         token_info.bonding_curve.current_price as f64).abs()
+    // Оптимизированное вычисление price impact
+    let current_price = curve.current_price;
+    let price_impact = if current_price > 0 {
+        // Используем целочисленную арифметику где возможно
+        let price_diff = if new_price > current_price {
+            new_price - current_price
+        } else {
+            current_price - new_price
+        };
+        (price_diff as f64) / (current_price as f64)
     } else {
         0.0
     };
@@ -155,7 +159,7 @@ pub fn buy_tokens(
         let final_sol_amount = sol_amount_after_fee.saturating_sub(whale_tax);
         
         // Recalculate with reduced amount
-        let tokens_to_receive = calculate_buy_amount(
+        let _tokens_to_receive = calculate_buy_amount(
             &token_info.bonding_curve,
             token_info.sol_reserves,
             token_info.token_reserves,
@@ -218,12 +222,14 @@ pub fn buy_tokens(
     token_info.bonding_curve.current_price = new_price;
     token_info.last_trade_at = clock.unix_timestamp;
     token_info.trade_count = token_info.trade_count.saturating_add(1);
-    token_info.current_market_cap = calculate_market_cap(
-        &token_info.bonding_curve,
-        new_sol_reserves,
-        new_token_reserves,
-        token_info.total_supply,
-    )?;
+    // Оптимизированное вычисление market cap с переиспользованием new_price
+    let circulating_supply = token_info.total_supply.saturating_sub(new_token_reserves);
+    token_info.current_market_cap = if circulating_supply > 0 {
+        // Используем уже вычисленную цену вместо пересчета
+        ((new_price as u128 * circulating_supply as u128) / 1_000_000_000).min(u64::MAX as u128) as u64
+    } else {
+        0
+    };
 
     // Check if token should graduate to DEX
     if token_info.current_market_cap >= token_info.bonding_curve.graduation_threshold {
@@ -244,6 +250,9 @@ pub fn buy_tokens(
     ctx.accounts.platform_config.total_volume = 
         ctx.accounts.platform_config.total_volume.saturating_add(sol_amount);
 
+    // Unlock trading after successful completion
+    ctx.accounts.platform_config.trading_locked = false;
+
     // Emit event
     emit!(TokenTraded {
         token: ctx.accounts.mint.key(),
@@ -253,6 +262,7 @@ pub fn buy_tokens(
         token_amount: tokens_to_receive,
         new_price,
         new_market_cap: token_info.current_market_cap,
+        price_impact,
         timestamp: clock.unix_timestamp,
     });
 
@@ -277,9 +287,13 @@ pub fn sell_tokens(
     
     // Validations
     require!(!ctx.accounts.platform_config.paused, CustomError::PlatformPaused);
+    require!(!ctx.accounts.platform_config.trading_locked, CustomError::PlatformPaused); // Reentrancy protection
     require!(!ctx.accounts.token_info.graduated, CustomError::TokenAlreadyGraduated);
     require!(token_amount > 0, CustomError::InvalidAmount);
     require!(slippage_tolerance <= 10000, CustomError::InvalidSlippage);
+    
+    // Lock trading to prevent reentrancy
+    ctx.accounts.platform_config.trading_locked = true;
 
     // Check if trader has enough tokens
     require!(
@@ -373,6 +387,14 @@ pub fn sell_tokens(
         new_token_reserves,
     )?;
 
+    // Calculate price impact for event
+    let price_impact = if token_info.bonding_curve.current_price > 0 {
+        ((token_info.bonding_curve.current_price as f64 - new_price as f64) / 
+         token_info.bonding_curve.current_price as f64).abs()
+    } else {
+        0.0
+    };
+
     // Update token info
     token_info.sol_reserves = new_sol_reserves;
     token_info.token_reserves = new_token_reserves;
@@ -394,6 +416,9 @@ pub fn sell_tokens(
     ctx.accounts.platform_config.total_volume = 
         ctx.accounts.platform_config.total_volume.saturating_add(sol_to_receive);
 
+    // Unlock trading after successful completion
+    ctx.accounts.platform_config.trading_locked = false;
+
     // Emit event
     emit!(TokenTraded {
         token: ctx.accounts.mint.key(),
@@ -403,6 +428,7 @@ pub fn sell_tokens(
         token_amount,
         new_price,
         new_market_cap: token_info.current_market_cap,
+        price_impact,
         timestamp: clock.unix_timestamp,
     });
 
@@ -418,11 +444,11 @@ pub fn sell_tokens(
 }
 
 // Helper functions for SOL transfers
-fn transfer_sol_from_user(
-    from: &AccountInfo,
-    to: &AccountInfo,
+fn transfer_sol_from_user<'a>(
+    from: &AccountInfo<'a>,
+    to: &AccountInfo<'a>,
     amount: u64,
-    system_program: &Program<System>,
+    system_program: &Program<'a, System>,
 ) -> Result<()> {
     let transfer_instruction = anchor_lang::system_program::Transfer {
         from: from.to_account_info(),
@@ -433,13 +459,22 @@ fn transfer_sol_from_user(
     anchor_lang::system_program::transfer(cpi_ctx, amount)
 }
 
-fn transfer_sol_from_vault(
-    from: &AccountInfo,
-    to: &AccountInfo,
+fn transfer_sol_from_vault<'a>(
+    from: &AccountInfo<'a>,
+    to: &AccountInfo<'a>,
     amount: u64,
-    system_program: &Program<System>,
+    system_program: &Program<'a, System>,
     vault_seeds: &[&[u8]],
 ) -> Result<()> {
+    // Check vault has sufficient balance before transfer
+    require!(
+        from.lamports() >= amount,
+        CustomError::InsufficientBalance
+    );
+    
+    // Additional safety check
+    require!(amount > 0, CustomError::InvalidAmount);
+    
     let transfer_instruction = anchor_lang::system_program::Transfer {
         from: from.to_account_info(),
         to: to.to_account_info(),
@@ -449,23 +484,11 @@ fn transfer_sol_from_vault(
     anchor_lang::system_program::transfer(cpi_ctx.with_signer(&[vault_seeds]), amount)
 }
 
-fn transfer_sol_to_treasury(
-    from: &AccountInfo,
-    to: &AccountInfo,
+fn transfer_sol_to_treasury<'a>(
+    from: &AccountInfo<'a>,
+    to: &AccountInfo<'a>,
     amount: u64,
-    system_program: &Program<System>,
+    system_program: &Program<'a, System>,
 ) -> Result<()> {
     transfer_sol_from_user(from, to, amount, system_program)
-}
-
-#[event]
-pub struct TokenTraded {
-    pub token: Pubkey,
-    pub trader: Pubkey,
-    pub is_buy: bool,
-    pub sol_amount: u64,
-    pub token_amount: u64,
-    pub new_price: u64,
-    pub new_market_cap: u64,
-    pub timestamp: i64,
 }
