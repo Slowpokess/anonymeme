@@ -24,9 +24,17 @@ class Settings(BaseSettings):
     
     # === БАЗА ДАННЫХ ===
     DATABASE_URL: str = Field(
-        "postgresql+asyncpg://devuser:devpass@localhost:5432/crypto_pump_anon",
+        "postgresql://devuser:devpass@localhost:5432/anonymeme",
         env="DATABASE_URL"
     )
+    ASYNC_DATABASE_URL: str = Field(
+        "postgresql+asyncpg://devuser:devpass@localhost:5432/anonymeme",
+        env="ASYNC_DATABASE_URL"
+    )
+    
+    # Настройки пула соединений
+    DB_POOL_SIZE: int = Field(20, env="DB_POOL_SIZE")
+    DB_MAX_OVERFLOW: int = Field(10, env="DB_MAX_OVERFLOW")
     
     # === REDIS ===
     REDIS_URL: str = Field(

@@ -1,0 +1,228 @@
+# ===================================================================
+# Anonymeme Backend Docker Compose
+# Production-ready development environment
+# ===================================================================
+
+version: '3.8'
+
+services:
+  # === BACKEND API ===
+  backend:
+    build:
+      context: .
+      target: development
+      dockerfile: Dockerfile
+    container_name: anonymeme_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=true
+      - DATABASE_URL=postgresql://anonymeme:anonymeme_pass@postgres:5432/anonymeme
+      - ASYNC_DATABASE_URL=postgresql+asyncpg://anonymeme:anonymeme_pass@postgres:5432/anonymeme
+      - REDIS_URL=redis://redis:6379
+      - SECRET_KEY=dev_secret_key_change_in_production
+      - SOLANA_RPC_URL=https://api.devnet.solana.com
+      - LOG_LEVEL=debug
+    volumes:
+      - .:/app
+      - logs_volume:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - anonymeme_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # === POSTGRESQL DATABASE ===
+  postgres:
+    image: postgres:16-alpine
+    container_name: anonymeme_postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=anonymeme
+      - POSTGRES_USER=anonymeme
+      - POSTGRES_PASSWORD=anonymeme_pass
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/migrations:/docker-entrypoint-initdb.d
+    networks:
+      - anonymeme_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U anonymeme -d anonymeme"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: >
+      postgres
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.track=all
+      -c max_connections=100
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c work_mem=4MB
+      -c maintenance_work_mem=64MB
+
+  # === REDIS CACHE ===
+  redis:
+    image: redis:7-alpine
+    container_name: anonymeme_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./config/redis.conf:/usr/local/etc/redis/redis.conf
+    networks:
+      - anonymeme_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    command: redis-server /usr/local/etc/redis/redis.conf --appendonly yes
+
+  # === MIGRATION RUNNER ===
+  migrate:
+    build:
+      context: .
+      target: production
+    container_name: anonymeme_migrate
+    environment:
+      - DATABASE_URL=postgresql://anonymeme:anonymeme_pass@postgres:5432/anonymeme
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - anonymeme_network
+    volumes:
+      - .:/app
+    command: python -m database.migrate migrate
+    profiles:
+      - migrate
+
+  # === TESTING SERVICE ===
+  test:
+    build:
+      context: .
+      target: testing
+    container_name: anonymeme_test
+    environment:
+      - DATABASE_URL=postgresql://anonymeme:anonymeme_pass@postgres:5432/anonymeme_test
+      - REDIS_URL=redis://redis:6379/1
+      - SECRET_KEY=test_secret_key
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - anonymeme_network
+    volumes:
+      - .:/app
+      - test_results:/app/test-results
+    profiles:
+      - test
+
+  # === PGADMIN (опционально) ===
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: anonymeme_pgadmin
+    ports:
+      - "5050:80"
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@anonymeme.local
+      - PGADMIN_DEFAULT_PASSWORD=admin
+      - PGADMIN_CONFIG_SERVER_MODE=False
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - anonymeme_network
+    profiles:
+      - admin
+    depends_on:
+      - postgres
+
+  # === REDIS COMMANDER (опционально) ===
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: anonymeme_redis_commander
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    networks:
+      - anonymeme_network
+    profiles:
+      - admin
+    depends_on:
+      - redis
+
+# === VOLUMES ===
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+  logs_volume:
+    driver: local
+  test_results:
+    driver: local
+
+# === NETWORKS ===
+networks:
+  anonymeme_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ===================================================================
+# ИСПОЛЬЗОВАНИЕ
+# ===================================================================
+
+# Запуск основных сервисов:
+# docker-compose up -d
+
+# Запуск с миграциями:
+# docker-compose --profile migrate up -d
+
+# Запуск тестов:
+# docker-compose --profile test up test
+
+# Запуск с админ панелями:
+# docker-compose --profile admin up -d
+
+# Просмотр логов:
+# docker-compose logs -f backend
+
+# Остановка всех сервисов:
+# docker-compose down
+
+# Полная очистка (с удалением данных):
+# docker-compose down -v
+
+# ===================================================================
+# PRODUCTION OVERRIDES
+# ===================================================================
+
+# Для продакшена создайте docker-compose.prod.yml:
+# version: '3.8'
+# services:
+#   backend:
+#     build:
+#       target: production
+#     environment:
+#       - DEBUG=false
+#       - LOG_LEVEL=info
+#     restart: always

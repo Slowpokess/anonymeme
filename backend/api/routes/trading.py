@@ -24,7 +24,8 @@ from ..schemas.requests import (
 )
 from ..schemas.responses import (
     TradeResponse, TradeEstimateResponse, TradesListResponse,
-    UserPortfolioResponse, BatchTradeResponse, SuccessResponse
+    UserPortfolioResponse, BatchTradeResponse, SuccessResponse,
+    TokenResponse, PaginationResponse
 )
 from ..services.blockchain import SolanaService, TradeResult
 from ..services.cache import CacheService

@@ -15,7 +15,7 @@ from sqlalchemy import (
     Enum as SQLEnum, DECIMAL, func
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import relationship, validates
 from sqlalchemy.ext.hybrid import hybrid_property
 import enum
@@ -92,6 +92,7 @@ class UserRole(enum.Enum):
     USER = "user"
     MODERATOR = "moderator"
     ADMIN = "admin"
+    SUPER_ADMIN = "super_admin"
 
 
 class UserStatus(enum.Enum):
@@ -100,6 +101,7 @@ class UserStatus(enum.Enum):
     SUSPENDED = "suspended"
     BANNED = "banned"
     PENDING = "pending"
+    DELETED = "deleted"
 
 
 # === ОСНОВНЫЕ МОДЕЛИ ===
@@ -144,7 +146,7 @@ class User(Base, UUIDMixin, TimestampMixin):
     )
     
     # Профиль
-    avatar_url = Column(String(500), comment="URL аватара")
+    profile_image_url = Column(String(500), comment="URL изображения профиля")
     bio = Column(Text, comment="Биография пользователя")
     website = Column(String(255), comment="Личный сайт")
     twitter_handle = Column(String(50), comment="Twitter handle")
