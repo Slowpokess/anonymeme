@@ -356,3 +356,47 @@ class HealthCheckRequest(BaseModel):
     """Запрос проверки здоровья системы"""
     detailed: bool = Field(False, description="Подробная информация")
     check_external: bool = Field(False, description="Проверять внешние сервисы")
+
+
+# === НЕДОСТАЮЩИЕ СХЕМЫ ИЗ АУДИТА ===
+
+class UserRegistrationRequest(BaseModel):
+    """Регистрация нового пользователя через кошелек"""
+    wallet_address: str = Field(..., min_length=44, max_length=44, description="Адрес Solana кошелька")
+    signature: str = Field(..., description="Подпись для верификации кошелька")
+    username: Optional[str] = Field(None, min_length=3, max_length=30, description="Никнейм пользователя")
+    email: Optional[str] = Field(None, description="Email для уведомлений")
+    
+    @validator('wallet_address')
+    def validate_wallet_address(cls, v):
+        if not v.isalnum():
+            raise ValueError('Некорректный адрес кошелька')
+        return v
+
+class UserProfileUpdateRequest(BaseModel):
+    """Обновление профиля пользователя"""
+    username: Optional[str] = Field(None, min_length=3, max_length=30)
+    bio: Optional[str] = Field(None, max_length=500, description="Биография")
+    avatar_url: Optional[str] = Field(None, description="URL аватара")
+    website: Optional[str] = Field(None, description="Веб-сайт")
+    twitter_handle: Optional[str] = Field(None, max_length=50, description="Twitter handle")
+    telegram_handle: Optional[str] = Field(None, max_length=50, description="Telegram handle")
+    
+    @validator('username')
+    def validate_username(cls, v):
+        if v and not v.replace('_', '').isalnum():
+            raise ValueError('Никнейм может содержать только буквы, цифры и подчеркивания')
+        return v
+
+class UserPasswordChangeRequest(BaseModel):
+    """Изменение пароля пользователя (для традиционной аутентификации)"""
+    current_signature: str = Field(..., description="Текущая подпись кошелька")
+    new_signature: str = Field(..., description="Новая подпись кошелька")
+    
+class SecurityParamsUpdateRequest(BaseModel):
+    """Обновление параметров безопасности"""
+    max_trade_size_sol: Optional[Decimal] = Field(None, gt=0, description="Максимальный размер сделки в SOL")
+    max_slippage_percent: Optional[float] = Field(None, ge=0, le=100, description="Максимальный slippage")
+    trading_paused: Optional[bool] = Field(None, description="Приостановить торговлю")
+    emergency_pause: Optional[bool] = Field(None, description="Экстренная остановка")
+    rate_limit_per_hour: Optional[int] = Field(None, gt=0, description="Лимит запросов в час")

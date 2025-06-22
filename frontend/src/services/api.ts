@@ -230,8 +230,28 @@ class ApiService {
 
   // === PORTFOLIO ===
 
-  async getUserPortfolio(userId: string): Promise<ApiResponse<Portfolio>> {
-    const response = await this.client.get(`/api/v1/trading/users/${userId}/portfolio`)
+  async getUserPortfolio(userId?: string): Promise<ApiResponse<Portfolio>> {
+    const endpoint = userId 
+      ? `/api/v1/trading/users/${userId}/portfolio`
+      : '/api/v1/trading/portfolio'
+    const response = await this.client.get(endpoint)
+    return response.data
+  }
+
+  async getTradingStats(period: '1h' | '24h' | '7d' | '30d' = '24h'): Promise<ApiResponse<{
+    period: string
+    total_trades: number
+    total_volume_sol: number
+    total_fees_paid: number
+    buy_trades: number
+    sell_trades: number
+    average_slippage: number
+    largest_trade_sol: number
+    trades_per_day: number
+  }>> {
+    const response = await this.client.get('/api/v1/trading/stats', {
+      params: { period }
+    })
     return response.data
   }
 

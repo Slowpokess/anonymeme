@@ -34,6 +34,7 @@ from sqlalchemy.orm import declarative_base
 from .routes import tokens, trading, users, analytics, admin
 from .services.blockchain import SolanaService
 from .services.cache import CacheService
+from .services.websocket import startup_websocket_service, shutdown_websocket_service, get_websocket_manager
 from .models.database import Base
 from .middleware.security import SecurityMiddleware
 from .middleware.logging import LoggingMiddleware
@@ -116,11 +117,20 @@ async def lifespan(app: FastAPI):
         
         cache_service = CacheService(redis_client)
         
+        # Запуск WebSocket сервера
+        logger.info("🔌 Запуск WebSocket сервера...")
+        await startup_websocket_service()
+        
         # Сохранение сервисов в app.state для доступа в handlers
         app.state.db_session = async_session
         app.state.redis = redis_client
         app.state.solana = solana_service
         app.state.cache = cache_service
+        app.state.websocket = get_websocket_manager()
+        
+        # Инициализация глобальных dependency
+        from .core.dependencies import set_dependencies
+        set_dependencies(async_session, redis_client, solana_service, cache_service)
         
         logger.info("✅ Все сервисы успешно инициализированы")
         
@@ -133,6 +143,9 @@ async def lifespan(app: FastAPI):
     finally:
         # Закрытие ресурсов
         logger.info("🔄 Закрытие соединений...")
+        
+        # Остановка WebSocket сервера
+        await shutdown_websocket_service()
         
         if redis_client:
             await redis_client.close()

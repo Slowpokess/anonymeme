@@ -6,7 +6,8 @@ Production-ready настройки с поддержкой различных �
 
 import os
 from typing import List, Optional, Union
-from pydantic import BaseSettings, validator, Field
+from pydantic import validator, Field
+from pydantic_settings import BaseSettings
 from functools import lru_cache
 
 
@@ -103,8 +104,12 @@ class Settings(BaseSettings):
     )
     
     # === WEBSOCKET ===
+    WEBSOCKET_HOST: str = Field("localhost", env="WEBSOCKET_HOST")
     WEBSOCKET_PORT: int = Field(8001, env="WEBSOCKET_PORT")
     WEBSOCKET_MAX_CONNECTIONS: int = Field(1000, env="WEBSOCKET_MAX_CONNECTIONS")
+    
+    # JWT для аутентификации WebSocket
+    JWT_ALGORITHM: str = Field("HS256", env="JWT_ALGORITHM")
     
     # === EMAIL (для уведомлений) ===
     SMTP_SERVER: Optional[str] = Field(None, env="SMTP_SERVER")

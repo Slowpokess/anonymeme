@@ -44,7 +44,9 @@ security = HTTPBearer()
 
 async def get_db() -> AsyncSession:
     """Dependency для получения сессии БД"""
-    pass
+    from ..main import get_db_session
+    async for session in get_db_session():
+        yield session
 
 
 async def get_current_user() -> User:

@@ -181,7 +181,7 @@ class User(Base, UUIDMixin, TimestampMixin):
     
     # JSON поля для расширенных данных
     preferences = Column(JSONB, default=dict, comment="Пользовательские настройки")
-    metadata = Column(JSONB, default=dict, comment="Дополнительные метаданные")
+    meta_data = Column(JSONB, default=dict, comment="Дополнительные метаданные")
     
     # Связи
     tokens = relationship("Token", back_populates="creator", foreign_keys="Token.creator_id")

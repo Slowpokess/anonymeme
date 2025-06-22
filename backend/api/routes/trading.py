@@ -7,7 +7,7 @@ Production-ready endpoints для покупки/продажи токенов
 import logging
 from typing import List, Optional, Dict, Any
 from uuid import UUID
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
@@ -43,25 +43,14 @@ router = APIRouter()
 
 
 # === DEPENDENCY FUNCTIONS ===
+# Импортируем из главного модуля dependencies
 
-async def get_db() -> AsyncSession:
-    """Dependency для получения сессии БД"""
-    pass
-
-
-async def get_current_user() -> User:
-    """Dependency для получения текущего пользователя"""
-    pass
-
-
-async def get_solana_service() -> SolanaService:
-    """Dependency для получения Solana сервиса"""
-    pass
-
-
-async def get_cache_service() -> CacheService:
-    """Dependency для получения Cache сервиса"""
-    pass
+from ..core.dependencies import (
+    get_db,
+    get_current_user,
+    get_solana_service,
+    get_cache_service
+)
 
 
 # === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
@@ -146,8 +135,8 @@ async def _update_user_token_balance(
             token_id=token_id,
             balance=max(amount_delta, Decimal('0')),
             avg_buy_price=avg_price,
-            first_trade_at=datetime.utcnow(),
-            last_trade_at=datetime.utcnow()
+            first_trade_at=datetime.now(timezone.utc),
+            last_trade_at=datetime.now(timezone.utc)
         )
         
         if amount_delta > 0:
@@ -159,7 +148,7 @@ async def _update_user_token_balance(
     else:
         # Обновление существующей записи
         user_token.balance += amount_delta
-        user_token.last_trade_at = datetime.utcnow()
+        user_token.last_trade_at = datetime.now(timezone.utc)
         
         if amount_delta > 0:
             # Покупка - обновляем средню цену покупки
@@ -181,7 +170,7 @@ async def _update_user_token_balance(
         
         # Устанавливаем first_trade_at если не было
         if not user_token.first_trade_at:
-            user_token.first_trade_at = datetime.utcnow()
+            user_token.first_trade_at = datetime.now(timezone.utc)
 
 
 async def _record_trade(
@@ -259,7 +248,7 @@ async def _update_user_stats(
     
     user.total_trades += 1
     user.total_volume_traded += trade_amount_sol
-    user.last_trade_at = datetime.utcnow()
+    user.last_trade_at = datetime.now(timezone.utc)
     
     if is_profitable:
         user.profitable_trades += 1
@@ -337,7 +326,7 @@ async def estimate_trade(
         )
         
         # Кэширование на 30 секунд
-        await cache.set(cache_key, response.dict(), "trade", ttl=30)
+        await cache.set(cache_key, response.model_dump(), "trade", ttl=30)
         
         return response
         
@@ -365,7 +354,7 @@ async def buy_tokens(
     Выполняет торговую операцию через смарт-контракт
     """
     try:
-        logger.info(f"User {current_user.id} buying tokens: {buy_request.dict()}")
+        logger.info(f"User {current_user.id} buying tokens: {buy_request.model_dump()}")
         
         # Получение токена
         stmt = select(Token).where(Token.mint_address == buy_request.token_address)
@@ -455,8 +444,8 @@ async def buy_tokens(
         await cache.delete_pattern(f"*{current_user.id}*", "user")
         
         # Формирование ответа
-        response = TradeResponse.from_orm(trade)
-        response.token = TokenResponse.from_orm(token)
+        response = TradeResponse.model_validate(trade)
+        response.token = TokenResponse.model_validate(token)
         
         logger.info(f"✅ Buy trade completed: {trade.transaction_signature}")
         
@@ -488,7 +477,7 @@ async def sell_tokens(
     Продажа токенов за SOL
     """
     try:
-        logger.info(f"User {current_user.id} selling tokens: {sell_request.dict()}")
+        logger.info(f"User {current_user.id} selling tokens: {sell_request.model_dump()}")
         
         # Получение токена
         stmt = select(Token).where(Token.mint_address == sell_request.token_address)
@@ -585,8 +574,8 @@ async def sell_tokens(
         await cache.delete_pattern(f"*{current_user.id}*", "user")
         
         # Формирование ответа
-        response = TradeResponse.from_orm(trade)
-        response.token = TokenResponse.from_orm(token)
+        response = TradeResponse.model_validate(trade)
+        response.token = TokenResponse.model_validate(token)
         
         logger.info(f"✅ Sell trade completed: {trade.transaction_signature}")
         
@@ -667,7 +656,7 @@ async def get_trade_history(
         trades = result.scalars().all()
         
         # Формирование ответа
-        trade_responses = [TradeResponse.from_orm(trade) for trade in trades]
+        trade_responses = [TradeResponse.model_validate(trade) for trade in trades]
         
         pagination = PaginationResponse(
             page=history_request.page,
@@ -749,7 +738,7 @@ async def get_user_portfolio(
                     unrealized_pnl = Decimal('0')
                 
                 position_data.append({
-                    "token": TokenResponse.from_orm(position.token).dict(),
+                    "token": TokenResponse.model_validate(position.token).model_dump(),
                     "balance": float(position.balance),
                     "avg_buy_price": float(position.avg_buy_price) if position.avg_buy_price else None,
                     "current_price": float(price_info.current_price),
@@ -780,7 +769,7 @@ async def get_user_portfolio(
         )
         
         # Кэширование на 2 минуты
-        await cache.set(cache_key, response.dict(), "user", ttl=120)
+        await cache.set(cache_key, response.model_dump(), "user", ttl=120)
         
         return response
         
@@ -840,7 +829,7 @@ async def execute_batch_trades(
                     results.append({
                         "index": i,
                         "success": True,
-                        "trade": trade_response.dict()
+                        "trade": trade_response.model_dump()
                     })
                     
                 except Exception as e:
@@ -848,7 +837,7 @@ async def execute_batch_trades(
                         "index": i,
                         "success": False,
                         "error": str(e),
-                        "trade_request": trade_request.dict()
+                        "trade_request": trade_request.model_dump()
                     }
                     
                     errors.append(error_info)
@@ -919,7 +908,7 @@ async def get_trading_stats(
             return cached_stats
         
         # Определение временного диапазона
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if period == "1h":
             start_time = now - timedelta(hours=1)
         elif period == "24h":

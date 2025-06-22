@@ -429,3 +429,77 @@ class ApiInfoResponse(BaseResponse):
     support_email: str = Field(..., description="Email поддержки")
     rate_limits: Dict[str, Any] = Field(..., description="Лимиты API")
     features: List[str] = Field(..., description="Доступные функции")
+
+
+# === ОТСУТСТВУЮЩИЕ СХЕМЫ ИЗ АУДИТА ===
+
+class AuthTokenResponse(BaseResponse):
+    """Ответ с токеном авторизации"""
+    access_token: str = Field(..., description="JWT токен доступа")
+    token_type: str = Field(default="Bearer", description="Тип токена")
+    expires_in: int = Field(..., description="Время жизни токена в секундах")
+    user: UserResponse = Field(..., description="Данные пользователя")
+
+class UserStatsResponse(BaseResponse):
+    """Статистика пользователя"""
+    total_trades: int = Field(..., description="Общее количество сделок")
+    total_volume: Decimal = Field(..., description="Общий объем торгов")
+    tokens_created: int = Field(..., description="Создано токенов")
+    portfolio_value: Decimal = Field(..., description="Стоимость портфеля")
+    pnl_24h: Decimal = Field(..., description="PnL за 24 часа")
+
+class UserTokensResponse(BaseResponse):
+    """Токены пользователя"""
+    tokens: List[TokenResponse] = Field(..., description="Список токенов")
+    total_count: int = Field(..., description="Общее количество")
+    total_value: Decimal = Field(..., description="Общая стоимость")
+
+class UserTradesResponse(BaseResponse):
+    """Сделки пользователя"""
+    trades: List[TradeResponse] = Field(..., description="Список сделок")
+    pagination: PaginationResponse = Field(..., description="Пагинация")
+
+class AdminDashboardResponse(BaseResponse):
+    """Данные админской панели"""
+    total_users: int = Field(..., description="Общее количество пользователей")
+    total_tokens: int = Field(..., description="Общее количество токенов")
+    total_volume_24h: Decimal = Field(..., description="Объем за 24 часа")
+    active_users_24h: int = Field(..., description="Активные пользователи за 24 часа")
+    platform_fees_24h: Decimal = Field(..., description="Комиссии платформы за 24 часа")
+
+class SystemHealthResponse(BaseResponse):
+    """Здоровье системы"""
+    status: str = Field(..., description="Статус системы")
+    database_status: str = Field(..., description="Статус базы данных")
+    blockchain_status: str = Field(..., description="Статус блокчейна")
+    cache_status: str = Field(..., description="Статус кэша")
+    uptime: int = Field(..., description="Время работы в секундах")
+
+class AdminUserResponse(UserResponse):
+    """Расширенные данные пользователя для админов"""
+    email: str = Field(..., description="Email пользователя")
+    ip_address: Optional[str] = Field(None, description="IP адрес")
+    warning_count: int = Field(..., description="Количество предупреждений")
+    last_login_ip: Optional[str] = Field(None, description="IP последнего входа")
+
+class AdminTokenResponse(TokenResponse):
+    """Расширенные данные токена для админов"""
+    security_flags: List[str] = Field(..., description="Флаги безопасности")
+    reported_count: int = Field(..., description="Количество жалоб")
+    admin_notes: Optional[str] = Field(None, description="Заметки администратора")
+
+class AdminTradeResponse(TradeResponse):
+    """Расширенные данные сделки для админов"""
+    ip_address: Optional[str] = Field(None, description="IP адрес трейдера")
+    risk_score: float = Field(..., description="Оценка риска")
+    flags: List[str] = Field(..., description="Флаги подозрительной активности")
+
+class SecurityLogResponse(BaseResponse):
+    """Запись в логе безопасности"""
+    id: UUID = Field(..., description="ID записи")
+    event_type: str = Field(..., description="Тип события")
+    severity: str = Field(..., description="Серьезность")
+    user_id: Optional[UUID] = Field(None, description="ID пользователя")
+    ip_address: Optional[str] = Field(None, description="IP адрес")
+    details: Dict[str, Any] = Field(..., description="Детали события")
+    created_at: datetime = Field(..., description="Время события")

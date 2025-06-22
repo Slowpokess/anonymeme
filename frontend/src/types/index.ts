@@ -35,6 +35,11 @@ export interface Token {
   volume_24h: string
   price_change_24h: number
   holders_count: number
+  // Дополнительные свойства для совместимости с компонентами
+  price: number // Дублирует current_price в числовом формате для удобства
+  bonding_curve_progress: number // Прогресс в процентах (0-100)
+  holders: number // Дублирует holders_count для удобства
+  liquidity: number // Ликвидность в SOL
 }
 
 export interface User {
