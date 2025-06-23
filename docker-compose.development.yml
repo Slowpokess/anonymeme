@@ -1,0 +1,290 @@
+# 🛠️ Docker Compose для Development окружения
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: crypto_pump_anon_dev
+      POSTGRES_USER: devuser
+      POSTGRES_PASSWORD: devpass
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+      - ./scripts/database/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./scripts/database/dev-seed.sql:/docker-entrypoint-initdb.d/dev-seed.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devuser -d crypto_pump_anon_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - anonymeme-dev
+
+  # PostgreSQL для тестов
+  postgres-test:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: crypto_pump_anon_test
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testpass
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testuser -d crypto_pump_anon_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - anonymeme-dev
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data_dev:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - anonymeme-dev
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+      target: development
+    ports:
+      - "8000:8000"
+      - "5678:5678"  # Debug port
+    env_file:
+      - .env.development
+    environment:
+      - DATABASE_URL=postgresql://devuser:devpass@postgres:5432/crypto_pump_anon_dev
+      - REDIS_URL=redis://redis:6379
+      - PYTHONPATH=/app
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - ./contracts/pump-core/target/idl:/app/idl
+      - backend_node_modules:/app/node_modules
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload --log-level debug
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - anonymeme-dev
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+      target: development
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env.development
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_WS_URL=ws://localhost:8001
+      - NEXT_PUBLIC_ENVIRONMENT=development
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    command: npm run dev -- --hostname 0.0.0.0
+    depends_on:
+      - backend
+    networks:
+      - anonymeme-dev
+
+  # WebSocket Service
+  websocket:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.websocket.dev
+      target: development
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env.development
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: python -m websocket.main
+    networks:
+      - anonymeme-dev
+
+  # Celery Worker
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+      target: development
+    env_file:
+      - .env.development
+    environment:
+      - DATABASE_URL=postgresql://devuser:devpass@postgres:5432/crypto_pump_anon_dev
+      - REDIS_URL=redis://redis:6379
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: celery -A worker.celery_app worker --loglevel=debug --concurrency=2
+    networks:
+      - anonymeme-dev
+
+  # Celery Beat (Scheduler)
+  scheduler:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+      target: development
+    env_file:
+      - .env.development
+    environment:
+      - DATABASE_URL=postgresql://devuser:devpass@postgres:5432/crypto_pump_anon_dev
+      - REDIS_URL=redis://redis:6379
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: celery -A worker.celery_app beat --loglevel=debug
+    networks:
+      - anonymeme-dev
+
+  # Prometheus (Monitoring)
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/monitoring/prometheus.dev.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data_dev:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=7d'
+      - '--web.enable-lifecycle'
+    networks:
+      - anonymeme-dev
+
+  # Grafana (Dashboards)
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana_data_dev:/var/lib/grafana
+      - ./infrastructure/monitoring/grafana/dev:/etc/grafana/provisioning
+    networks:
+      - anonymeme-dev
+
+  # MailHog (Email testing)
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # Web UI
+    networks:
+      - anonymeme-dev
+
+  # Jaeger (Distributed tracing)
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"  # Web UI
+      - "14268:14268"  # HTTP collector
+    environment:
+      - COLLECTOR_ZIPKIN_HTTP_PORT=9411
+    networks:
+      - anonymeme-dev
+
+  # Redis Commander (Redis UI)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    networks:
+      - anonymeme-dev
+
+  # pgAdmin (PostgreSQL UI)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@anonymeme.dev
+      - PGADMIN_DEFAULT_PASSWORD=admin123
+      - PGADMIN_CONFIG_SERVER_MODE=False
+    ports:
+      - "8080:80"
+    depends_on:
+      - postgres
+    networks:
+      - anonymeme-dev
+
+volumes:
+  postgres_data_dev:
+    driver: local
+  postgres_test_data:
+    driver: local
+  redis_data_dev:
+    driver: local
+  prometheus_data_dev:
+    driver: local
+  grafana_data_dev:
+    driver: local
+  backend_node_modules:
+    driver: local
+
+networks:
+  anonymeme-dev:
+    driver: bridge
+    name: anonymeme-dev-network

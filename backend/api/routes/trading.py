@@ -29,6 +29,7 @@ from ..schemas.responses import (
 )
 from ..services.blockchain import SolanaService, TradeResult
 from ..services.cache import CacheService
+from ..services.websocket import get_websocket_manager, WebSocketManager
 from ..core.exceptions import (
     ValidationException, InsufficientBalanceException, TradingPausedException,
     MaxTradeSizeExceededException, InsufficientLiquidityException,
@@ -443,6 +444,64 @@ async def buy_tokens(
         await cache.delete_pattern(f"*{token.mint_address}*", "price")
         await cache.delete_pattern(f"*{current_user.id}*", "user")
         
+        # WebSocket уведомления
+        ws_manager = get_websocket_manager()
+        
+        # Уведомление о новой торговой операции
+        await ws_manager.notify_new_trade({
+            "trade_id": str(trade.id),
+            "token_mint": token.mint_address,
+            "token_name": token.name,
+            "token_symbol": token.symbol,
+            "trade_type": "buy",
+            "user_id": str(current_user.id),
+            "user_wallet": current_user.wallet_address,
+            "sol_amount": float(trade_result.sol_amount),
+            "tokens_amount": float(trade_result.tokens_amount),
+            "price_per_token": float(trade_result.price_per_token),
+            "market_cap_before": float(market_cap_before),
+            "market_cap_after": float(market_cap_after),
+            "price_impact": trade.price_impact,
+            "fees_paid": float(trade_result.fees_paid),
+            "transaction_signature": trade_result.transaction_signature,
+            "timestamp": trade.created_at.isoformat()
+        })
+        
+        # Уведомление об обновлении цены токена
+        await ws_manager.notify_price_update(
+            token_mint=token.mint_address,
+            price_data={
+                "token_name": token.name,
+                "token_symbol": token.symbol,  
+                "current_price": float(trade_result.price_per_token),
+                "previous_price": float(market_cap_before / token.token_supply) if token.token_supply > 0 else 0,
+                "market_cap": float(market_cap_after),
+                "price_change_24h": 0,  # Будет рассчитан позже
+                "volume_24h": float(token.volume_24h),
+                "trade_count": token.trade_count,
+                "sol_reserves": float(token.sol_reserves),
+                "token_reserves": float(token.token_reserves),
+                "last_trade_at": trade.created_at.isoformat()
+            }
+        )
+        
+        # Уведомление об обновлении портфеля пользователя
+        user_balance = await _get_user_token_balance(db, current_user.id, token.id)
+        await ws_manager.notify_portfolio_update(
+            user_id=str(current_user.id),
+            portfolio_data={
+                "user_id": str(current_user.id),
+                "token_mint": token.mint_address,
+                "token_name": token.name,
+                "token_symbol": token.symbol,
+                "balance": float(user_balance),
+                "avg_buy_price": float(trade_result.price_per_token),
+                "current_value": float(user_balance * trade_result.price_per_token),
+                "pnl": 0,  # При покупке PnL = 0
+                "last_trade_at": trade.created_at.isoformat()
+            }
+        )
+        
         # Формирование ответа
         response = TradeResponse.model_validate(trade)
         response.token = TokenResponse.model_validate(token)
@@ -572,6 +631,67 @@ async def sell_tokens(
         # Очистка кэша
         await cache.delete_pattern(f"*{token.mint_address}*", "price")
         await cache.delete_pattern(f"*{current_user.id}*", "user")
+        
+        # WebSocket уведомления
+        ws_manager = get_websocket_manager()
+        
+        # Уведомление о новой торговой операции
+        await ws_manager.notify_new_trade({
+            "trade_id": str(trade.id),
+            "token_mint": token.mint_address,
+            "token_name": token.name,
+            "token_symbol": token.symbol,
+            "trade_type": "sell",
+            "user_id": str(current_user.id),
+            "user_wallet": current_user.wallet_address,
+            "sol_amount": float(trade_result.sol_amount),
+            "tokens_amount": float(sell_request.token_amount),
+            "price_per_token": float(trade_result.price_per_token),
+            "market_cap_before": float(market_cap_before),
+            "market_cap_after": float(market_cap_after),
+            "price_impact": trade.price_impact,
+            "fees_paid": float(trade_result.fees_paid),
+            "transaction_signature": trade_result.transaction_signature,
+            "timestamp": trade.created_at.isoformat(),
+            "is_profitable": is_profitable
+        })
+        
+        # Уведомление об обновлении цены токена
+        await ws_manager.notify_price_update(
+            token_mint=token.mint_address,
+            price_data={
+                "token_name": token.name,
+                "token_symbol": token.symbol,  
+                "current_price": float(trade_result.price_per_token),
+                "previous_price": float(market_cap_before / token.token_supply) if token.token_supply > 0 else 0,
+                "market_cap": float(market_cap_after),
+                "price_change_24h": 0,  # Будет рассчитан позже
+                "volume_24h": float(token.volume_24h),
+                "trade_count": token.trade_count,
+                "sol_reserves": float(token.sol_reserves),
+                "token_reserves": float(token.token_reserves),
+                "last_trade_at": trade.created_at.isoformat()
+            }
+        )
+        
+        # Уведомление об обновлении портфеля пользователя
+        user_balance = await _get_user_token_balance(db, current_user.id, token.id)
+        current_value = float(user_balance * trade_result.price_per_token)
+        
+        await ws_manager.notify_portfolio_update(
+            user_id=str(current_user.id),
+            portfolio_data={
+                "user_id": str(current_user.id),
+                "token_mint": token.mint_address,
+                "token_name": token.name,
+                "token_symbol": token.symbol,
+                "balance": float(user_balance),
+                "avg_buy_price": float(trade_result.price_per_token),  # Упрощенно, в реальности нужна историческая цена
+                "current_value": current_value,
+                "pnl": float(trade_result.sol_amount) if is_profitable else -float(trade_result.sol_amount),
+                "last_trade_at": trade.created_at.isoformat()
+            }
+        )
         
         # Формирование ответа
         response = TradeResponse.model_validate(trade)

@@ -537,43 +537,502 @@ macro_rules! require_non_empty {
     };
 }
 
-// Тестовые функции для проверки ошибок
+// Comprehensive unit тесты для модуля ошибок
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_error_categorization() {
-        assert_eq!(
-            CustomError::TokenAlreadyGraduated.get_category() as u8,
-            ErrorCategory::Trading as u8
-        );
-        assert!(CustomError::BotActivityDetected.is_security_related());
-        assert!(CustomError::CircuitBreakerTriggered.is_critical());
+        // Тест общих ошибок (6000-6099)
+        assert!(matches!(CustomError::PlatformPaused.get_category(), ErrorCategory::General));
+        assert!(matches!(CustomError::InvalidAmount.get_category(), ErrorCategory::General));
+        assert!(matches!(CustomError::Unauthorized.get_category(), ErrorCategory::General));
+
+        // Тест ошибок создания токенов (6100-6199)
+        assert!(matches!(CustomError::NameTooLong.get_category(), ErrorCategory::TokenCreation));
+        assert!(matches!(CustomError::SymbolTooLong.get_category(), ErrorCategory::TokenCreation));
+        assert!(matches!(CustomError::InvalidBondingCurveParams.get_category(), ErrorCategory::TokenCreation));
+
+        // Тест торговых ошибок (6200-6299)
+        assert!(matches!(CustomError::SlippageExceeded.get_category(), ErrorCategory::Trading));
+        assert!(matches!(CustomError::TradeSizeExceeded.get_category(), ErrorCategory::Trading));
+        assert!(matches!(CustomError::TokenAlreadyGraduated.get_category(), ErrorCategory::Trading));
+
+        // Тест ошибок листинга на DEX (6300-6399)
+        assert!(matches!(CustomError::NotEligibleForGraduation.get_category(), ErrorCategory::DexListing));
+        assert!(matches!(CustomError::AlreadyGraduated.get_category(), ErrorCategory::DexListing));
+
+        // Тест ошибок безопасности (6400-6499)
+        assert!(matches!(CustomError::AdminOnly.get_category(), ErrorCategory::Security));
+        assert!(matches!(CustomError::UserBanned.get_category(), ErrorCategory::Security));
+        assert!(matches!(CustomError::EmergencyMode.get_category(), ErrorCategory::Security));
+
+        // Тест ошибок профилей (6500-6599)
+        assert!(matches!(CustomError::UserProfileNotFound.get_category(), ErrorCategory::UserProfile));
+        assert!(matches!(CustomError::InvalidReputationScore.get_category(), ErrorCategory::UserProfile));
+
+        // Тест математических ошибок (6600-6699)
+        assert!(matches!(CustomError::DivisionByZero.get_category(), ErrorCategory::Mathematical));
+        assert!(matches!(CustomError::MathematicalOverflow.get_category(), ErrorCategory::Mathematical));
+
+        // Тест временных ошибок (6700-6799)
+        assert!(matches!(CustomError::InvalidTimestamp.get_category(), ErrorCategory::Temporal));
+        assert!(matches!(CustomError::CooldownNotElapsed.get_category(), ErrorCategory::Temporal));
+
+        // Тест сетевых ошибок (6800-6899)
+        assert!(matches!(CustomError::NetworkCongestion.get_category(), ErrorCategory::Network));
+        assert!(matches!(CustomError::RpcTimeout.get_category(), ErrorCategory::Network));
+
+        // Тест бизнес-логики (6900-6999)
+        assert!(matches!(CustomError::LaunchWindowClosed.get_category(), ErrorCategory::BusinessLogic));
+        assert!(matches!(CustomError::PresaleEnded.get_category(), ErrorCategory::BusinessLogic));
+    }
+
+    #[test]
+    fn test_critical_errors_identification() {
+        let critical_errors = vec![
+            CustomError::OverflowOrUnderflowOccurred,
+            CustomError::CircuitBreakerTriggered,
+            CustomError::BotActivityDetected,
+            CustomError::MarketManipulationDetected,
+            CustomError::HoneypotDetected,
+            CustomError::EmergencyMode,
+            CustomError::SecurityScoreTooLow,
+            CustomError::SuspiciousActivity,
+        ];
+
+        for error in critical_errors {
+            assert!(error.is_critical(), "Error {:?} should be critical", error);
+        }
+
+        // Тест не критических ошибок
+        let non_critical_errors = vec![
+            CustomError::SlippageExceeded,
+            CustomError::InvalidAmount,
+            CustomError::NameTooLong,
+            CustomError::TradingTooFast,
+        ];
+
+        for error in non_critical_errors {
+            assert!(!error.is_critical(), "Error {:?} should not be critical", error);
+        }
+    }
+
+    #[test]
+    fn test_security_related_errors() {
+        let security_errors = vec![
+            CustomError::BotActivityDetected,
+            CustomError::MarketManipulationDetected,
+            CustomError::HoneypotDetected,
+            CustomError::SuspiciousActivity,
+            CustomError::AccountLocked,
+            CustomError::UserBanned,
+            CustomError::TokenFlagged,
+            CustomError::SecurityScoreTooLow,
+            CustomError::WhaleProtectionTriggered,
+            CustomError::SpamProtection,
+        ];
+
+        for error in security_errors {
+            assert!(error.is_security_related(), "Error {:?} should be security related", error);
+        }
+
+        // Тест не связанных с безопасностью ошибок
+        let non_security_errors = vec![
+            CustomError::SlippageExceeded,
+            CustomError::NameTooLong,
+            CustomError::InvalidAmount,
+            CustomError::NetworkCongestion,
+        ];
+
+        for error in non_security_errors {
+            assert!(!error.is_security_related(), "Error {:?} should not be security related", error);
+        }
     }
 
     #[test]
     fn test_error_priorities() {
+        // Критические ошибки
+        assert_eq!(CustomError::EmergencyMode.get_priority(), ErrorPriority::Critical);
+        assert_eq!(CustomError::CircuitBreakerTriggered.get_priority(), ErrorPriority::Critical);
+        assert_eq!(CustomError::OverflowOrUnderflowOccurred.get_priority(), ErrorPriority::Critical);
+
+        // Высокоприоритетные ошибки (безопасность)
+        assert_eq!(CustomError::BotActivityDetected.get_priority(), ErrorPriority::High);
+        assert_eq!(CustomError::MarketManipulationDetected.get_priority(), ErrorPriority::High);
+        assert_eq!(CustomError::UserBanned.get_priority(), ErrorPriority::High);
+
+        // Среднеприоритетные ошибки
+        assert_eq!(CustomError::NetworkCongestion.get_priority(), ErrorPriority::Medium);
+        assert_eq!(CustomError::RpcTimeout.get_priority(), ErrorPriority::Medium);
+        assert_eq!(CustomError::TradingTooFast.get_priority(), ErrorPriority::Medium);
+        assert_eq!(CustomError::SlippageExceeded.get_priority(), ErrorPriority::Medium);
+
+        // Низкоприоритетные ошибки
+        assert_eq!(CustomError::NameTooLong.get_priority(), ErrorPriority::Low);
+        assert_eq!(CustomError::InvalidAmount.get_priority(), ErrorPriority::Low);
+        assert_eq!(CustomError::EventTooOld.get_priority(), ErrorPriority::Low);
+    }
+
+    #[test]
+    fn test_user_action_recommendations() {
         assert_eq!(
-            CustomError::EmergencyMode.get_priority(),
-            ErrorPriority::Critical
+            CustomError::SlippageExceeded.get_user_action(),
+            "Increase slippage tolerance or try again later"
         );
         assert_eq!(
-            CustomError::BotActivityDetected.get_priority(),
-            ErrorPriority::High
+            CustomError::TradingTooFast.get_user_action(),
+            "Wait a moment before next trade"
         );
         assert_eq!(
-            CustomError::SlippageExceeded.get_priority(),
-            ErrorPriority::Medium
+            CustomError::NetworkCongestion.get_user_action(),
+            "Network is busy, please try again in a few minutes"
+        );
+        assert_eq!(
+            CustomError::InsufficientBalance.get_user_action(),
+            "Add more funds to your wallet"
+        );
+        assert_eq!(
+            CustomError::SpamProtection.get_user_action(),
+            "Wait 5 minutes before creating another token"
+        );
+        assert_eq!(
+            CustomError::TradeSizeExceeded.get_user_action(),
+            "Reduce trade size or split into smaller trades"
+        );
+        assert_eq!(
+            CustomError::MinHoldTimeNotMet.get_user_action(),
+            "Wait before selling (minimum hold time required)"
+        );
+        assert_eq!(
+            CustomError::TokenAlreadyGraduated.get_user_action(),
+            "Trade this token on the DEX instead"
+        );
+        assert_eq!(
+            CustomError::KYCRequired.get_user_action(),
+            "Complete KYC verification to continue"
+        );
+        assert_eq!(
+            CustomError::UserBanned.get_user_action(),
+            "Contact support - your account is banned"
+        );
+
+        // Тест дефолтного действия
+        assert_eq!(
+            CustomError::DivisionByZero.get_user_action(),
+            "Check transaction details and try again"
         );
     }
 
     #[test]
-    fn test_notification_requirements() {
-        assert!(CustomError::MarketManipulationDetected.should_notify_admin());
-        assert!(!CustomError::SlippageExceeded.should_notify_admin());
-        assert!(CustomError::SuspiciousActivity.should_log());
-        assert!(!CustomError::TradingTooFast.should_log());
+    fn test_logging_requirements() {
+        // Ошибки, которые не должны логироваться
+        let no_log_errors = vec![
+            CustomError::SlippageExceeded,
+            CustomError::TradingTooFast,
+            CustomError::InvalidAmount,
+            CustomError::InsufficientBalance,
+        ];
+
+        for error in no_log_errors {
+            assert!(!error.should_log(), "Error {:?} should not be logged", error);
+        }
+
+        // Ошибки, которые должны логироваться
+        let should_log_errors = vec![
+            CustomError::BotActivityDetected,
+            CustomError::MarketManipulationDetected,
+            CustomError::EmergencyMode,
+            CustomError::DexListingFailed,
+            CustomError::UserBanned,
+        ];
+
+        for error in should_log_errors {
+            assert!(error.should_log(), "Error {:?} should be logged", error);
+        }
+    }
+
+    #[test]
+    fn test_admin_notification_requirements() {
+        // Ошибки, требующие уведомления админа
+        let notify_admin_errors = vec![
+            CustomError::EmergencyMode,
+            CustomError::CircuitBreakerTriggered,
+            CustomError::BotActivityDetected,
+            CustomError::MarketManipulationDetected,
+            CustomError::HoneypotDetected,
+            CustomError::SuspiciousActivity,
+            CustomError::DexListingFailed,
+        ];
+
+        for error in notify_admin_errors {
+            assert!(error.should_notify_admin(), "Error {:?} should notify admin", error);
+        }
+
+        // Ошибки, не требующие уведомления админа
+        let no_notify_errors = vec![
+            CustomError::SlippageExceeded,
+            CustomError::TradingTooFast,
+            CustomError::InvalidAmount,
+            CustomError::NameTooLong,
+            CustomError::NetworkCongestion,
+        ];
+
+        for error in no_notify_errors {
+            assert!(!error.should_notify_admin(), "Error {:?} should not notify admin", error);
+        }
+    }
+
+    #[test]
+    fn test_error_priority_ordering() {
+        assert!(ErrorPriority::Critical > ErrorPriority::High);
+        assert!(ErrorPriority::High > ErrorPriority::Medium);
+        assert!(ErrorPriority::Medium > ErrorPriority::Low);
+        
+        // Тест сравнения приоритетов
+        let priorities = vec![
+            ErrorPriority::Low,
+            ErrorPriority::Medium,
+            ErrorPriority::High,
+            ErrorPriority::Critical,
+        ];
+        
+        for i in 0..priorities.len() - 1 {
+            assert!(priorities[i] < priorities[i + 1]);
+        }
+    }
+
+    #[test]
+    fn test_error_category_variants() {
+        let categories = vec![
+            ErrorCategory::General,
+            ErrorCategory::TokenCreation,
+            ErrorCategory::Trading,
+            ErrorCategory::DexListing,
+            ErrorCategory::Security,
+            ErrorCategory::UserProfile,
+            ErrorCategory::Mathematical,
+            ErrorCategory::Temporal,
+            ErrorCategory::Network,
+            ErrorCategory::BusinessLogic,
+            ErrorCategory::Unknown,
+        ];
+
+        // Все категории должны быть клонируемыми
+        for category in categories {
+            let cloned = category.clone();
+            // Сравнение по Debug representation, так как PartialEq не реализован
+            assert_eq!(format!("{:?}", category), format!("{:?}", cloned));
+        }
+    }
+
+    #[test]
+    fn test_error_code_ranges() {
+        // Проверка, что ошибки попадают в правильные диапазоны кодов
+        assert!((CustomError::PlatformPaused as u32) >= 6000);
+        assert!((CustomError::PlatformPaused as u32) < 6100);
+        
+        assert!((CustomError::NameTooLong as u32) >= 6100);
+        assert!((CustomError::NameTooLong as u32) < 6200);
+        
+        assert!((CustomError::TradeSizeExceeded as u32) >= 6200);
+        assert!((CustomError::TradeSizeExceeded as u32) < 6300);
+        
+        assert!((CustomError::NotEligibleForGraduation as u32) >= 6300);
+        assert!((CustomError::NotEligibleForGraduation as u32) < 6400);
+        
+        assert!((CustomError::AdminOnly as u32) >= 6400);
+        assert!((CustomError::AdminOnly as u32) < 6500);
+        
+        assert!((CustomError::UserProfileNotFound as u32) >= 6500);
+        assert!((CustomError::UserProfileNotFound as u32) < 6600);
+        
+        assert!((CustomError::DivisionByZero as u32) >= 6600);
+        assert!((CustomError::DivisionByZero as u32) < 6700);
+        
+        assert!((CustomError::InvalidTimestamp as u32) >= 6700);
+        assert!((CustomError::InvalidTimestamp as u32) < 6800);
+        
+        assert!((CustomError::NetworkCongestion as u32) >= 6800);
+        assert!((CustomError::NetworkCongestion as u32) < 6900);
+        
+        assert!((CustomError::LaunchWindowClosed as u32) >= 6900);
+        assert!((CustomError::LaunchWindowClosed as u32) < 7000);
+    }
+
+    #[test]
+    fn test_all_errors_have_messages() {
+        // Тест что у всех ошибок есть сообщения (проверяем через Display)
+        use std::error::Error;
+        
+        let all_errors = vec![
+            // Общие ошибки
+            CustomError::PlatformPaused,
+            CustomError::InvalidAmount,
+            CustomError::InsufficientBalance,
+            CustomError::Unauthorized,
+            
+            // Ошибки создания токенов
+            CustomError::NameTooLong,
+            CustomError::SymbolTooLong,
+            CustomError::InvalidBondingCurveParams,
+            CustomError::SpamProtection,
+            
+            // Торговые ошибки
+            CustomError::TradeSizeExceeded,
+            CustomError::SlippageExceeded,
+            CustomError::TradingTooFast,
+            CustomError::TokenAlreadyGraduated,
+            
+            // Ошибки безопасности
+            CustomError::BotActivityDetected,
+            CustomError::MarketManipulationDetected,
+            CustomError::UserBanned,
+            CustomError::EmergencyMode,
+            
+            // Математические ошибки
+            CustomError::DivisionByZero,
+            CustomError::MathematicalOverflow,
+            CustomError::SqrtNegativeNumber,
+            
+            // Временные ошибки
+            CustomError::InvalidTimestamp,
+            CustomError::CooldownNotElapsed,
+            CustomError::DeadlineExceeded,
+            
+            // Сетевые ошибки
+            CustomError::NetworkCongestion,
+            CustomError::RpcTimeout,
+            CustomError::CpiFailure,
+        ];
+
+        for error in all_errors {
+            let message = format!("{}", error);
+            assert!(!message.is_empty(), "Error {:?} should have a message", error);
+            assert!(message.len() > 5, "Error {:?} message too short: {}", error, message);
+        }
+    }
+
+    #[test]
+    fn test_error_consistency() {
+        // Тест что критические ошибки также являются ошибками безопасности или требуют уведомления админа
+        let critical_errors = vec![
+            CustomError::OverflowOrUnderflowOccurred,
+            CustomError::CircuitBreakerTriggered,
+            CustomError::BotActivityDetected,
+            CustomError::MarketManipulationDetected,
+            CustomError::HoneypotDetected,
+            CustomError::EmergencyMode,
+            CustomError::SecurityScoreTooLow,
+            CustomError::SuspiciousActivity,
+        ];
+
+        for error in critical_errors {
+            assert!(error.is_critical());
+            // Критические ошибки должны или быть связаны с безопасностью, или требовать уведомления админа
+            assert!(
+                error.is_security_related() || error.should_notify_admin(),
+                "Critical error {:?} should be security related or notify admin",
+                error
+            );
+        }
+    }
+
+    #[test]
+    fn test_macro_helpers() {
+        // Тест макросов (они должны компилироваться)
+        fn test_require_macros() -> Result<(), CustomError> {
+            let value = 5u64;
+            let limit = 10u64;
+            
+            require_gte!(value, 1, CustomError::InvalidAmount);
+            require_lte!(value, limit, CustomError::TradeSizeExceeded);
+            require_gt!(value, 0, CustomError::InvalidAmount);
+            require_lt!(value, 100, CustomError::TradeSizeExceeded);
+            require_not_zero!(value, CustomError::DivisionByZero);
+            
+            let text = "valid text";
+            require_non_empty!(text, CustomError::NameTooLong);
+            
+            Ok(())
+        }
+        
+        // Макросы должны работать без ошибок для валидных значений
+        assert!(test_require_macros().is_ok());
+        
+        // Тест что макросы правильно возвращают ошибки
+        fn test_require_failure() -> Result<(), CustomError> {
+            let value = 0u64;
+            require_not_zero!(value, CustomError::DivisionByZero);
+            Ok(())
+        }
+        
+        let result = test_require_failure();
+        assert!(result.is_err());
+        if let Err(err) = result {
+            assert_eq!(err, CustomError::DivisionByZero);
+        }
+    }
+
+    #[test]
+    fn test_unknown_error_category() {
+        // Тест для случая неизвестной категории (не должно происходить в реальности)
+        // Но функция должна обработать любой код ошибки
+        
+        // Создаем фиктивную ошибку с кодом вне диапазонов
+        // Это тест для полноты покрытия кода
+        
+        // Проверяем граничные случаи
+        let category_6099 = match 6099 {
+            6000..=6099 => ErrorCategory::General,
+            6100..=6199 => ErrorCategory::TokenCreation,
+            6200..=6299 => ErrorCategory::Trading,
+            6300..=6399 => ErrorCategory::DexListing,
+            6400..=6499 => ErrorCategory::Security,
+            6500..=6599 => ErrorCategory::UserProfile,
+            6600..=6699 => ErrorCategory::Mathematical,
+            6700..=6799 => ErrorCategory::Temporal,
+            6800..=6899 => ErrorCategory::Network,
+            6900..=6999 => ErrorCategory::BusinessLogic,
+            _ => ErrorCategory::Unknown,
+        };
+        
+        assert!(matches!(category_6099, ErrorCategory::General));
+        
+        let category_unknown = match 7000 {
+            6000..=6099 => ErrorCategory::General,
+            6100..=6199 => ErrorCategory::TokenCreation,
+            6200..=6299 => ErrorCategory::Trading,
+            6300..=6399 => ErrorCategory::DexListing,
+            6400..=6499 => ErrorCategory::Security,
+            6500..=6599 => ErrorCategory::UserProfile,
+            6600..=6699 => ErrorCategory::Mathematical,
+            6700..=6799 => ErrorCategory::Temporal,
+            6800..=6899 => ErrorCategory::Network,
+            6900..=6999 => ErrorCategory::BusinessLogic,
+            _ => ErrorCategory::Unknown,
+        };
+        
+        assert!(matches!(category_unknown, ErrorCategory::Unknown));
+    }
+
+    #[test]
+    fn test_error_combinations() {
+        // Тест комбинаций свойств ошибок
+        let error = CustomError::BotActivityDetected;
+        assert!(error.is_critical());
+        assert!(error.is_security_related());
+        assert!(error.should_notify_admin());
+        assert!(error.should_log());
+        assert_eq!(error.get_priority(), ErrorPriority::Critical);
+        
+        let error2 = CustomError::SlippageExceeded;
+        assert!(!error2.is_critical());
+        assert!(!error2.is_security_related());
+        assert!(!error2.should_notify_admin());
+        assert!(!error2.should_log());
+        assert_eq!(error2.get_priority(), ErrorPriority::Medium);
     }
 }
 

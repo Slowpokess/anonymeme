@@ -8,106 +8,81 @@
 import React, { useState, useEffect } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
-import { Search, TrendingUp, TrendingDown, Filter, ArrowLeft } from 'lucide-react'
+import { Search, TrendingUp, TrendingDown, Filter, ArrowLeft, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Card } from '@/components/ui/Card'
-import TradePanel from '@/components/trading/TradePanel'
-import { Token, TradeType, TokenStatus, CurveType } from '@/types'
+import TradingInterface from '@/components/TradingInterface'
+import RealTimeUpdates from '@/components/RealTimeUpdates'
+import { Token, TradeType, TokenStatus, CurveType, PaginatedResponse } from '@/types'
+import { apiService } from '@/services/api'
+import toast from 'react-hot-toast'
 
-// Моковые данные для демонстрации
-const mockTokens: Token[] = [
-  {
-    id: '1',
-    symbol: 'DOGE2',
-    name: 'DogeCoin 2.0',
-    description: 'Much wow, very trade, such gains!',
-    image: '🐕',
-    mint: 'DQw4w9WgXcQ',
-    creator: 'Anon123',
-    created_at: '2024-01-15T00:00:00Z',
-    updated_at: '2024-01-15T00:00:00Z',
-    status: TokenStatus.ACTIVE,
-    supply: '1000000000',
-    decimals: 9,
-    curve_type: CurveType.EXPONENTIAL,
-    bonding_curve_params: {
-      initial_price: '0.0001',
-      max_price: '0.01',
-      curve_steepness: 2.5,
-      liquidity_threshold: '50000'
-    },
-    current_price: '0.0001234',
-    market_cap: '125000',
-    sol_reserves: '500',
-    token_reserves: '4000000',
-    graduation_threshold: '100000',
-    graduated: false,
-    is_flagged: false,
-    total_trades: 1250,
-    volume_24h: '45000',
-    price_change_24h: 12.5,
-    holders_count: 856,
-    // Дополнительные свойства для совместимости
-    price: 0.0001234,
-    bonding_curve_progress: 65.8,
-    holders: 856,
-    liquidity: 50000
-  },
-  {
-    id: '2',
-    symbol: 'PEPE',
-    name: 'Pepe Classic',
-    description: 'Feels good man! The original meme token.',
-    image: '🐸',
-    mint: 'PePeW4w9WgXcQ',
-    creator: 'FrogLord',
-    created_at: '2024-01-10T00:00:00Z',
-    updated_at: '2024-01-10T00:00:00Z',
-    status: TokenStatus.ACTIVE,
-    supply: '1000000000',
-    decimals: 9,
-    curve_type: CurveType.EXPONENTIAL,
-    bonding_curve_params: {
-      initial_price: '0.00005',
-      max_price: '0.005',
-      curve_steepness: 2.0,
-      liquidity_threshold: '40000'
-    },
-    current_price: '0.0000567',
-    market_cap: '89000',
-    sol_reserves: '350',
-    token_reserves: '6000000',
-    graduation_threshold: '100000',
-    graduated: false,
-    is_flagged: false,
-    total_trades: 890,
-    volume_24h: '23000',
-    price_change_24h: -5.2,
-    holders_count: 642,
-    // Дополнительные свойства для совместимости
-    price: 0.0000567,
-    bonding_curve_progress: 42.1,
-    holders: 642,
-    liquidity: 35000
-  }
-]
+// Функция для вычисления дополнительных свойств токена для совместимости
+const enrichToken = (token: Token): Token => ({
+  ...token,
+  price: parseFloat(token.current_price),
+  bonding_curve_progress: Math.min((parseFloat(token.market_cap) / parseFloat(token.graduation_threshold)) * 100, 100),
+  holders: token.holders_count,
+  liquidity: parseFloat(token.sol_reserves)
+})
 
 export default function TradePage() {
   const [mounted, setMounted] = useState(false)
   const [selectedToken, setSelectedToken] = useState<Token | null>(null)
+  const [tokens, setTokens] = useState<Token[]>([])
+  const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState<'market_cap' | 'volume_24h' | 'price_change_24h'>('market_cap')
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: 20,
+    total: 0,
+    pages: 0,
+    has_next: false,
+    has_prev: false
+  })
   
-  const { connected } = useWallet()
+  const { connected, publicKey } = useWallet()
+
+  // Загрузка токенов
+  useEffect(() => {
+    const loadTokens = async () => {
+      try {
+        setLoading(true)
+        const response = await apiService.getTokens({
+          page: pagination.page,
+          limit: pagination.limit,
+          search: searchQuery || undefined,
+          sort_by: sortBy,
+          order: 'desc',
+          status: 'active'
+        })
+
+        const enrichedTokens = response.data.map(enrichToken)
+        setTokens(enrichedTokens)
+        setPagination(response.pagination)
+
+        // Выбираем первый токен по умолчанию
+        if (enrichedTokens.length > 0 && !selectedToken) {
+          setSelectedToken(enrichedTokens[0])
+        }
+      } catch (error) {
+        console.error('Failed to load tokens:', error)
+        toast.error('Ошибка загрузки токенов')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    if (mounted) {
+      loadTokens()
+    }
+  }, [mounted, pagination.page, sortBy, searchQuery])
 
   useEffect(() => {
     setMounted(true)
-    // Выбираем первый токен по умолчанию
-    if (mockTokens.length > 0) {
-      setSelectedToken(mockTokens[0])
-    }
   }, [])
 
   if (!mounted) {
@@ -118,23 +93,25 @@ export default function TradePage() {
     )
   }
 
-  const filteredTokens = mockTokens.filter(token =>
-    token.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    token.symbol.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  // Поиск с debounce
+  const [searchDebounced, setSearchDebounced] = useState('')
+  
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearchDebounced(searchQuery)
+    }, 500)
+    
+    return () => clearTimeout(timer)
+  }, [searchQuery])
 
-  const sortedTokens = [...filteredTokens].sort((a, b) => {
-    switch (sortBy) {
-      case 'market_cap':
-        return parseFloat(b.market_cap) - parseFloat(a.market_cap)
-      case 'volume_24h':
-        return parseFloat(b.volume_24h) - parseFloat(a.volume_24h)
-      case 'price_change_24h':
-        return b.price_change_24h - a.price_change_24h
-      default:
-        return 0
+  // Перезагрузка при изменении поискового запроса
+  useEffect(() => {
+    if (mounted) {
+      setPagination(prev => ({ ...prev, page: 1 }))
     }
-  })
+  }, [searchDebounced])
+
+  const displayedTokens = tokens
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -216,8 +193,17 @@ export default function TradePage() {
 
                 {/* Список токенов */}
                 <div className="space-y-3">
-                  {sortedTokens.map((token) => (
-                    <div
+                  {loading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                    </div>
+                  ) : displayedTokens.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">
+                      {searchQuery ? 'Токены не найдены' : 'Нет доступных токенов'}
+                    </div>
+                  ) : (
+                    displayedTokens.map((token) => (
+                      <div
                       key={token.id}
                       onClick={() => setSelectedToken(token)}
                       className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
@@ -257,19 +243,35 @@ export default function TradePage() {
                         </div>
                         <div className="flex justify-between">
                           <span>Капитализация:</span>
-                          <span className="font-medium">${(parseFloat(token.market_cap) / 1000).toFixed(1)}K</span>
+                          <span className="font-medium">${(Number(token.market_cap) / 1000).toFixed(1)}K</span>
                         </div>
                         <div className="flex justify-between">
                           <span>Объем 24ч:</span>
-                          <span className="font-medium">${(parseFloat(token.volume_24h) / 1000).toFixed(1)}K</span>
+                          <span className="font-medium">${(Number(token.volume_24h) / 1000).toFixed(1)}K</span>
                         </div>
                         <div className="flex justify-between">
                           <span>Прогресс кривой:</span>
                           <span className="font-medium">{token.bonding_curve_progress.toFixed(1)}%</span>
                         </div>
                       </div>
+                      </div>
+                    ))
+                  )}
+                  
+                  {/* Пагинация */}
+                  {pagination.has_next && (
+                    <div className="mt-4">
+                      <Button 
+                        variant="outline" 
+                        onClick={() => setPagination(prev => ({ ...prev, page: prev.page + 1 }))}
+                        disabled={loading}
+                        className="w-full"
+                      >
+                        {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                        Загрузить еще
+                      </Button>
                     </div>
-                  ))}
+                  )}
                 </div>
               </Card>
             </div>
@@ -330,11 +332,11 @@ export default function TradePage() {
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                       <div>
                         <div className="text-gray-600">Капитализация</div>
-                        <div className="font-semibold">${(selectedToken.market_cap / 1000).toFixed(1)}K</div>
+                        <div className="font-semibold">${(Number(selectedToken.market_cap) / 1000).toFixed(1)}K</div>
                       </div>
                       <div>
                         <div className="text-gray-600">Объем 24ч</div>
-                        <div className="font-semibold">${(selectedToken.volume_24h / 1000).toFixed(1)}K</div>
+                        <div className="font-semibold">${(Number(selectedToken.volume_24h) / 1000).toFixed(1)}K</div>
                       </div>
                       <div>
                         <div className="text-gray-600">Держатели</div>
@@ -347,8 +349,27 @@ export default function TradePage() {
                     </div>
                   </Card>
 
-                  {/* Торговая панель */}
-                  <TradePanel token={selectedToken} />
+                  {/* Торговая панель с WebSocket */}
+                  <TradingInterface 
+                    token={{
+                      ...selectedToken,
+                      mint_address: selectedToken.mint,
+                      sol_reserves: selectedToken.liquidity,
+                      token_reserves: Number(selectedToken.total_supply) || 1000000,
+                      trades_24h: Number(selectedToken.trades_count) || 0,
+                      bonding_curve_progress: selectedToken.bonding_curve_progress,
+                      graduation_threshold: Number(selectedToken.graduation_threshold) || 69000,
+                      is_graduated: selectedToken.bonding_curve_progress >= 100
+                    }}
+                    userWallet={publicKey?.toString()}
+                    userId={publicKey?.toString()} // В реальном приложении нужен настоящий user_id
+                    onTradeComplete={(trade) => {
+                      console.log('Торговая операция завершена:', trade)
+                      toast.success(`Торговля завершена: ${trade.transaction_signature}`)
+                      // Перезагрузка токенов для обновления данных
+                      setPagination(prev => ({ ...prev, page: 1 }))
+                    }}
+                  />
                 </div>
               ) : (
                 <Card className="p-12 text-center">

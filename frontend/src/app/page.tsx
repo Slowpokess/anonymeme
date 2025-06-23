@@ -12,11 +12,33 @@ import { Button } from '@/components/ui/Button'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
 import { useWalletStore } from '@/store/wallet'
+import { apiService } from '@/services/api'
+import { Analytics } from '@/types'
+import toast from 'react-hot-toast'
 
 export default function HomePage() {
   const [mounted, setMounted] = useState(false)
+  const [analytics, setAnalytics] = useState<Analytics | null>(null)
+  const [loading, setLoading] = useState(true)
   const { connected, publicKey } = useWallet()
   const { balance, user } = useWalletStore()
+
+  // Загрузка аналитики
+  useEffect(() => {
+    const loadAnalytics = async () => {
+      try {
+        const response = await apiService.getAnalytics()
+        setAnalytics(response.data)
+      } catch (error) {
+        console.error('Failed to load analytics:', error)
+        toast.error('Ошибка загрузки статистики')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadAnalytics()
+  }, [])
 
   // Избегаем SSR проблем
   useEffect(() => {
@@ -53,11 +75,29 @@ export default function HomePage() {
     }
   ]
 
-  const stats = [
-    { label: 'Токенов создано', value: '1,234' },
-    { label: 'Общий объем', value: '₿12.5K SOL' },
-    { label: 'Активных трейдеров', value: '5,678' },
-    { label: 'Сделок за 24ч', value: '890' }
+  // Формируем статистику из загруженных данных
+  const stats = analytics ? [
+    { 
+      label: 'Токенов создано', 
+      value: analytics.tokens_created_24h.toLocaleString() 
+    },
+    { 
+      label: 'Общий объем', 
+      value: `${parseFloat(analytics.total_volume_24h).toLocaleString()} SOL` 
+    },
+    { 
+      label: 'Активных трейдеров', 
+      value: analytics.active_traders_24h.toLocaleString() 
+    },
+    { 
+      label: 'Сделок за 24ч', 
+      value: analytics.recent_trades.length.toLocaleString() 
+    }
+  ] : [
+    { label: 'Токенов создано', value: loading ? '...' : '0' },
+    { label: 'Общий объем', value: loading ? '...' : '0 SOL' },
+    { label: 'Активных трейдеров', value: loading ? '...' : '0' },
+    { label: 'Сделок за 24ч', value: loading ? '...' : '0' }
   ]
 
   return (

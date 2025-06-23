@@ -1,0 +1,480 @@
+# 🚀 Docker Compose для Production окружения
+version: '3.8'
+
+services:
+  # Backend API (Multiple replicas)
+  backend:
+    image: ${DOCKER_REGISTRY}/anonymeme/backend:${DOCKER_IMAGE_TAG:-latest}
+    deploy:
+      replicas: 3
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 30s
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+        window: 60s
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+    env_file:
+      - .env.production
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    secrets:
+      - source: prod_db_password
+        target: db_password
+      - source: prod_redis_password
+        target: redis_password
+      - source: prod_jwt_secret
+        target: jwt_secret
+      - source: prod_encryption_key
+        target: encryption_key
+      - source: prod_solana_private_key
+        target: solana_private_key
+    volumes:
+      - type: bind
+        source: ./contracts/pump-core/target/idl
+        target: /app/idl
+        read_only: true
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 4 --worker-class uvicorn.workers.UvicornWorker
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 120s
+    networks:
+      - anonymeme-prod
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: "fluentd:24224"
+        tag: "anonymeme.backend"
+
+  # Frontend (Multiple replicas)
+  frontend:
+    image: ${DOCKER_REGISTRY}/anonymeme/frontend:${DOCKER_IMAGE_TAG:-latest}
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    env_file:
+      - .env.production
+    environment:
+      - NEXT_PUBLIC_API_URL=https://api.anonymeme.io
+      - NEXT_PUBLIC_WS_URL=wss://ws.anonymeme.io
+      - NEXT_PUBLIC_ENVIRONMENT=production
+    networks:
+      - anonymeme-prod
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: "fluentd:24224"
+        tag: "anonymeme.frontend"
+
+  # WebSocket Service (Multiple replicas)
+  websocket:
+    image: ${DOCKER_REGISTRY}/anonymeme/websocket:${DOCKER_IMAGE_TAG:-latest}
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    env_file:
+      - .env.production
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    secrets:
+      - source: prod_redis_password
+        target: redis_password
+    networks:
+      - anonymeme-prod
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: "fluentd:24224"
+        tag: "anonymeme.websocket"
+
+  # Celery Workers (Multiple replicas)
+  worker:
+    image: ${DOCKER_REGISTRY}/anonymeme/backend:${DOCKER_IMAGE_TAG:-latest}
+    deploy:
+      replicas: 4
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+        window: 60s
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+    env_file:
+      - .env.production
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    secrets:
+      - source: prod_db_password
+        target: db_password
+      - source: prod_redis_password
+        target: redis_password
+      - source: prod_solana_private_key
+        target: solana_private_key
+    command: celery -A worker.celery_app worker --loglevel=info --concurrency=8 --prefetch-multiplier=2
+    healthcheck:
+      test: ["CMD", "celery", "-A", "worker.celery_app", "inspect", "ping"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+    networks:
+      - anonymeme-prod
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: "fluentd:24224"
+        tag: "anonymeme.worker"
+
+  # Celery Beat (Single replica)
+  scheduler:
+    image: ${DOCKER_REGISTRY}/anonymeme/backend:${DOCKER_IMAGE_TAG:-latest}
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 30s
+        max_attempts: 3
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    env_file:
+      - .env.production
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    secrets:
+      - source: prod_db_password
+        target: db_password
+      - source: prod_redis_password
+        target: redis_password
+    command: celery -A worker.celery_app beat --loglevel=info
+    networks:
+      - anonymeme-prod
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: "fluentd:24224"
+        tag: "anonymeme.scheduler"
+
+  # NGINX Load Balancer
+  nginx:
+    image: nginx:alpine
+    ports:
+      - target: 80
+        published: 80
+        mode: host
+      - target: 443
+        published: 443
+        mode: host
+    volumes:
+      - type: bind
+        source: ./infrastructure/nginx/production.conf
+        target: /etc/nginx/nginx.conf
+        read_only: true
+      - type: bind
+        source: ./infrastructure/ssl/production
+        target: /etc/nginx/ssl
+        read_only: true
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    depends_on:
+      - backend
+      - frontend
+      - websocket
+    networks:
+      - anonymeme-prod
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: "fluentd:24224"
+        tag: "anonymeme.nginx"
+
+  # Prometheus Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - type: bind
+        source: ./infrastructure/monitoring/prometheus.production.yml
+        target: /etc/prometheus/prometheus.yml
+        read_only: true
+      - type: volume
+        source: prometheus_data_prod
+        target: /prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=365d'
+      - '--storage.tsdb.retention.size=50GB'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.external-url=https://prometheus.anonymeme.io'
+      - '--web.enable-admin-api'
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
+    networks:
+      - anonymeme-prod
+
+  # Grafana Dashboards
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD__FILE=/run/secrets/grafana_password
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=https://grafana.anonymeme.io
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      - GF_SECURITY_COOKIE_SECURE=true
+      - GF_SECURITY_STRICT_TRANSPORT_SECURITY=true
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource,grafana-worldmap-panel,grafana-piechart-panel
+    volumes:
+      - type: volume
+        source: grafana_data_prod
+        target: /var/lib/grafana
+      - type: bind
+        source: ./infrastructure/monitoring/grafana/production
+        target: /etc/grafana/provisioning
+        read_only: true
+    secrets:
+      - source: prod_grafana_password
+        target: grafana_password
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    networks:
+      - anonymeme-prod
+
+  # Alert Manager
+  alertmanager:
+    image: prom/alertmanager:latest
+    ports:
+      - "9093:9093"
+    volumes:
+      - type: bind
+        source: ./infrastructure/monitoring/alertmanager.production.yml
+        target: /etc/alertmanager/alertmanager.yml
+        read_only: true
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+    networks:
+      - anonymeme-prod
+
+  # Fluentd Log Aggregator
+  fluentd:
+    image: fluent/fluentd:v1.16-debian-1
+    ports:
+      - "24224:24224"
+    volumes:
+      - type: bind
+        source: ./infrastructure/logging/fluentd.production.conf
+        target: /fluentd/etc/fluent.conf
+        read_only: true
+      - type: bind
+        source: /var/log
+        target: /var/log
+        read_only: true
+    environment:
+      - FLUENTD_CONF=fluent.conf
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+    networks:
+      - anonymeme-prod
+
+  # Jaeger Distributed Tracing
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"
+      - "14268:14268"
+    environment:
+      - COLLECTOR_ZIPKIN_HTTP_PORT=9411
+      - SPAN_STORAGE_TYPE=elasticsearch
+      - ES_SERVER_URLS=http://elasticsearch:9200
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+    networks:
+      - anonymeme-prod
+
+  # Elasticsearch (для Jaeger)
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.8.0
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+      - xpack.security.enabled=false
+    volumes:
+      - type: volume
+        source: elasticsearch_data_prod
+        target: /usr/share/elasticsearch/data
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+    networks:
+      - anonymeme-prod
+
+  # Backup Service
+  backup:
+    image: ${DOCKER_REGISTRY}/anonymeme/backup:${DOCKER_IMAGE_TAG:-latest}
+    environment:
+      - BACKUP_SCHEDULE=0 2 * * *  # Daily at 2 AM
+      - S3_BUCKET=${PROD_BACKUP_S3_BUCKET}
+      - AWS_REGION=${PROD_AWS_REGION}
+    secrets:
+      - source: prod_db_password
+        target: db_password
+      - source: aws_backup_credentials
+        target: aws_credentials
+    volumes:
+      - type: volume
+        source: backup_data_prod
+        target: /backup
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 60s
+        max_attempts: 3
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+    networks:
+      - anonymeme-prod
+
+secrets:
+  prod_db_password:
+    external: true
+  prod_redis_password:
+    external: true
+  prod_jwt_secret:
+    external: true
+  prod_encryption_key:
+    external: true
+  prod_solana_private_key:
+    external: true
+  prod_grafana_password:
+    external: true
+  aws_backup_credentials:
+    external: true
+
+volumes:
+  prometheus_data_prod:
+    driver: local
+  grafana_data_prod:
+    driver: local
+  elasticsearch_data_prod:
+    driver: local
+  backup_data_prod:
+    driver: local
+
+networks:
+  anonymeme-prod:
+    driver: overlay
+    name: anonymeme-prod-network
+    attachable: false
+    encrypted: true

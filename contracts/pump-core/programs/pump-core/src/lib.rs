@@ -128,3 +128,14 @@ pub mod pump_core {
         instructions::transfer_admin(ctx)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_program_id() {
+        let expected_id = "7wUQXRQtBzTmyp9kcrmok9FKcc4RSYXxPYN9FGDLnqxb";
+        assert_eq!(id().to_string(), expected_id);
+    }
+}

@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.orm import declarative_base
 
 # Импорты наших модулей
-from .routes import tokens, trading, users, analytics, admin
+from .routes import tokens, trading, users, analytics, admin, websocket
 from .services.blockchain import SolanaService
 from .services.cache import CacheService
 from .services.websocket import startup_websocket_service, shutdown_websocket_service, get_websocket_manager
@@ -398,6 +398,7 @@ app.include_router(trading.router, prefix="/api/v1/trading", tags=["Trading"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
 app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["Analytics"])
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["Admin"])
+app.include_router(websocket.router, prefix="/api/v1/websocket", tags=["WebSocket"])
 
 
 if __name__ == "__main__":

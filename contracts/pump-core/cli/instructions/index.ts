@@ -60,6 +60,33 @@ export type {
   ReportReason
 } from "./reportSuspiciousActivity"
 
+export { emergencyPause, pauseTrading } from "./emergencyPause"
+export type {
+  EmergencyPauseArgs,
+  EmergencyPauseAccounts,
+  TradingPauseArgs,
+  TradingPauseAccounts
+} from "./emergencyPause"
+
+export { 
+  updatePlatformFee, 
+  updateTreasury, 
+  transferAdmin, 
+  banToken, 
+  unbanToken, 
+  collectPlatformFees 
+} from "./adminFunctions"
+export type {
+  UpdatePlatformFeeArgs,
+  UpdateTreasuryArgs,
+  TransferAdminArgs,
+  BanTokenArgs,
+  CollectFeesArgs,
+  AdminAccounts,
+  ManageTokenAccounts,
+  CollectFeesAccounts
+} from "./adminFunctions"
+
 // Старые инструкции (оставлены для совместимости)
 export { initialize } from "./initialize"
 export type { InitializeArgs, InitializeAccounts } from "./initialize"

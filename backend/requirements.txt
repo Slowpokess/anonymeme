@@ -20,9 +20,9 @@ redis==5.0.1
 hiredis==2.2.3
 
 # === SOLANA BLOCKCHAIN ===
-solana==0.31.2
+solana==0.36.7
 anchorpy==0.18.0
-solders==0.19.1
+solders==0.26.0
 construct==2.10.70
 
 # === AUTHENTICATION & SECURITY ===

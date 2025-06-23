@@ -407,3 +407,351 @@ impl PriceHistory {
     pub const SEED_PREFIX: &'static str = "price_history";
     pub const ACCOUNT_SIZE: usize = 8 + 32 + 8 + 8 + 8 + 8 + 4 + 8 + 1 + 1;
 }
+
+// Implementation methods для создания дефолтных структур
+impl Default for SecurityParams {
+    fn default() -> Self {
+        Self {
+            max_trade_size: 100_000_000_000, // 100 SOL
+            max_wallet_percentage: 5.0, // 5%
+            daily_volume_limit: 1_000_000_000_000, // 1000 SOL
+            hourly_trade_limit: 10,
+            whale_tax_threshold: 10_000_000_000, // 10 SOL
+            whale_tax_rate: 2.0, // 2%
+            early_sell_tax: 1.0, // 1%
+            liquidity_tax: 0.5, // 0.5%
+            min_hold_time: 300, // 5 минут
+            trade_cooldown: 10, // 10 секунд
+            creation_cooldown: 3600, // 1 час
+            circuit_breaker_threshold: 50.0, // 50%
+            max_price_impact: 10.0, // 10%
+            anti_bot_enabled: true,
+            honeypot_detection: true,
+            require_kyc_for_large_trades: false,
+            min_reputation_to_create: 0.0,
+            max_tokens_per_creator: 5,
+        }
+    }
+}
+
+impl BondingCurve {
+    pub fn new(
+        curve_type: CurveType,
+        initial_price: u64,
+        graduation_threshold: u64,
+        slope: f64,
+        initial_supply: u64,
+    ) -> Self {
+        Self {
+            curve_type,
+            initial_price,
+            current_price: initial_price,
+            graduation_threshold,
+            slope,
+            volatility_damper: 1.0,
+            initial_supply,
+        }
+    }
+}
+
+impl Achievement {
+    pub fn new(id: u32, tier: u8) -> Self {
+        Self {
+            id,
+            unlocked_at: Clock::get().unwrap().unix_timestamp,
+            tier,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_security_params_default() {
+        let params = SecurityParams::default();
+        assert_eq!(params.max_trade_size, 100_000_000_000);
+        assert_eq!(params.max_wallet_percentage, 5.0);
+        assert!(params.anti_bot_enabled);
+        assert!(params.honeypot_detection);
+        assert_eq!(params.max_tokens_per_creator, 5);
+    }
+
+    #[test]
+    fn test_bonding_curve_creation() {
+        let curve = BondingCurve::new(
+            CurveType::Linear,
+            1000, // initial_price
+            50_000_000_000_000, // graduation_threshold (50 SOL)
+            0.000001, // slope
+            1_000_000_000_000_000, // initial_supply (1 млрд)
+        );
+
+        assert_eq!(curve.curve_type, CurveType::Linear);
+        assert_eq!(curve.initial_price, 1000);
+        assert_eq!(curve.current_price, 1000);
+        assert_eq!(curve.graduation_threshold, 50_000_000_000_000);
+        assert_eq!(curve.slope, 0.000001);
+        assert_eq!(curve.volatility_damper, 1.0);
+        assert_eq!(curve.initial_supply, 1_000_000_000_000_000);
+    }
+
+    #[test]
+    fn test_achievement_creation() {
+        let achievement = Achievement::new(1, 3);
+        assert_eq!(achievement.id, 1);
+        assert_eq!(achievement.tier, 3);
+        assert!(achievement.unlocked_at > 0);
+    }
+
+    #[test]
+    fn test_curve_type_variants() {
+        let types = vec![
+            CurveType::Linear,
+            CurveType::Exponential,
+            CurveType::Logarithmic,
+            CurveType::Sigmoid,
+            CurveType::ConstantProduct,
+        ];
+
+        for curve_type in types {
+            // Все типы должны быть валидными
+            let curve = BondingCurve::new(
+                curve_type.clone(),
+                1000,
+                50_000_000_000_000,
+                0.000001,
+                1_000_000_000_000_000,
+            );
+            assert_eq!(curve.curve_type, curve_type);
+        }
+    }
+
+    #[test]
+    fn test_dex_type_variants() {
+        let dex_types = vec![
+            DexType::Raydium,
+            DexType::Jupiter,
+            DexType::Orca,
+            DexType::Serum,
+            DexType::Meteora,
+        ];
+
+        for dex_type in dex_types {
+            // Все типы DEX должны быть валидными
+            match dex_type {
+                DexType::Raydium => assert_eq!(dex_type, DexType::Raydium),
+                DexType::Jupiter => assert_eq!(dex_type, DexType::Jupiter),
+                DexType::Orca => assert_eq!(dex_type, DexType::Orca),
+                DexType::Serum => assert_eq!(dex_type, DexType::Serum),
+                DexType::Meteora => assert_eq!(dex_type, DexType::Meteora),
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn test_custom_dex_type() {
+        let custom_program_id = Pubkey::new_unique();
+        let custom_dex = DexType::Custom { program_id: custom_program_id };
+        
+        if let DexType::Custom { program_id } = custom_dex {
+            assert_eq!(program_id, custom_program_id);
+        } else {
+            panic!("Expected Custom DexType");
+        }
+    }
+
+    #[test]
+    fn test_report_reason_variants() {
+        let reasons = vec![
+            ReportReason::Spam,
+            ReportReason::Scam,
+            ReportReason::RugPull,
+            ReportReason::MarketManipulation,
+            ReportReason::FakeMetadata,
+            ReportReason::Impersonation,
+            ReportReason::Other,
+        ];
+
+        assert_eq!(reasons.len(), 7);
+        assert!(reasons.contains(&ReportReason::RugPull));
+        assert!(reasons.contains(&ReportReason::Scam));
+    }
+
+    #[test]
+    fn test_price_period_variants() {
+        let periods = vec![
+            PricePeriod::OneMinute,
+            PricePeriod::FiveMinutes,
+            PricePeriod::FifteenMinutes,
+            PricePeriod::OneHour,
+            PricePeriod::FourHours,
+            PricePeriod::OneDay,
+        ];
+
+        assert_eq!(periods.len(), 6);
+        assert!(periods.contains(&PricePeriod::OneHour));
+        assert!(periods.contains(&PricePeriod::OneDay));
+    }
+
+    #[test]
+    fn test_bonding_curve_params_creation() {
+        let params = BondingCurveParams {
+            curve_type: CurveType::Exponential,
+            initial_supply: 1_000_000_000_000_000,
+            initial_price: 1000,
+            graduation_threshold: 50_000_000_000_000,
+            slope: 0.000001,
+            volatility_damper: Some(1.5),
+        };
+
+        assert_eq!(params.curve_type, CurveType::Exponential);
+        assert_eq!(params.initial_supply, 1_000_000_000_000_000);
+        assert_eq!(params.initial_price, 1000);
+        assert_eq!(params.graduation_threshold, 50_000_000_000_000);
+        assert_eq!(params.slope, 0.000001);
+        assert_eq!(params.volatility_damper, Some(1.5));
+    }
+
+    #[test]
+    fn test_security_params_validation() {
+        let mut params = SecurityParams::default();
+        
+        // Валидные параметры
+        assert!(params.max_trade_size > 0);
+        assert!(params.max_wallet_percentage > 0.0 && params.max_wallet_percentage <= 100.0);
+        assert!(params.daily_volume_limit > 0);
+        assert!(params.circuit_breaker_threshold > 0.0);
+        assert!(params.max_price_impact > 0.0);
+        
+        // Тест edge cases
+        params.max_wallet_percentage = 0.1; // 0.1%
+        assert!(params.max_wallet_percentage >= 0.0);
+        
+        params.circuit_breaker_threshold = 100.0; // 100%
+        assert!(params.circuit_breaker_threshold <= 100.0);
+    }
+
+    #[test]
+    fn test_account_size_constants() {
+        // Проверка, что константы размеров аккаунтов разумны
+        assert!(PlatformConfig::ACCOUNT_SIZE > 0);
+        assert!(PlatformConfig::ACCOUNT_SIZE < 10000); // Разумный лимит
+        
+        assert!(TokenInfo::ACCOUNT_SIZE > 0);
+        assert!(TokenInfo::ACCOUNT_SIZE < 10000);
+        
+        assert!(UserProfile::ACCOUNT_SIZE > 0);
+        assert!(UserProfile::ACCOUNT_SIZE < 10000);
+        
+        assert!(SuspiciousActivityReport::ACCOUNT_SIZE > 0);
+        assert!(DexListing::ACCOUNT_SIZE > 0);
+        assert!(PriceHistory::ACCOUNT_SIZE > 0);
+    }
+
+    #[test]
+    fn test_string_length_constants() {
+        // Проверка констант максимальной длины строк
+        assert_eq!(TokenInfo::MAX_NAME_LEN, 50);
+        assert_eq!(TokenInfo::MAX_SYMBOL_LEN, 10);
+        assert_eq!(TokenInfo::MAX_URI_LEN, 200);
+        assert_eq!(TokenInfo::MAX_DESCRIPTION_LEN, 500);
+        assert_eq!(TokenInfo::MAX_URL_LEN, 100);
+        
+        // Проверка, что лимиты разумны
+        assert!(TokenInfo::MAX_NAME_LEN > 0 && TokenInfo::MAX_NAME_LEN <= 100);
+        assert!(TokenInfo::MAX_SYMBOL_LEN > 0 && TokenInfo::MAX_SYMBOL_LEN <= 20);
+        assert!(TokenInfo::MAX_URI_LEN > 0 && TokenInfo::MAX_URI_LEN <= 500);
+    }
+
+    #[test]
+    fn test_seed_constants() {
+        // Проверка seed константы для PDA
+        assert_eq!(PlatformConfig::SEED, "platform_config");
+        assert_eq!(TokenInfo::SEED_PREFIX, "token_info");
+        assert_eq!(UserProfile::SEED_PREFIX, "user_profile");
+        assert_eq!(SuspiciousActivityReport::SEED_PREFIX, "report");
+        assert_eq!(DexListing::SEED_PREFIX, "dex_listing");
+        assert_eq!(PriceHistory::SEED_PREFIX, "price_history");
+        
+        // Все seeds должны быть непустыми и разумной длины
+        assert!(!PlatformConfig::SEED.is_empty());
+        assert!(PlatformConfig::SEED.len() <= 32);
+        assert!(!TokenInfo::SEED_PREFIX.is_empty());
+        assert!(TokenInfo::SEED_PREFIX.len() <= 32);
+    }
+
+    #[test]
+    fn test_enum_clone_and_partial_eq() {
+        // Тест что enums поддерживают Clone и PartialEq
+        let curve1 = CurveType::Linear;
+        let curve2 = curve1.clone();
+        assert_eq!(curve1, curve2);
+        
+        let dex1 = DexType::Raydium;
+        let dex2 = dex1.clone();
+        assert_eq!(dex1, dex2);
+        
+        let reason1 = ReportReason::Scam;
+        let reason2 = reason1.clone();
+        assert_eq!(reason1, reason2);
+        
+        let period1 = PricePeriod::OneHour;
+        let period2 = period1.clone();
+        assert_eq!(period1, period2);
+    }
+
+    #[test]
+    fn test_struct_clone() {
+        // Тест клонирования структур
+        let original_curve = BondingCurve::new(
+            CurveType::Linear,
+            1000,
+            50_000_000_000_000,
+            0.000001,
+            1_000_000_000_000_000,
+        );
+        
+        let cloned_curve = original_curve.clone();
+        assert_eq!(original_curve.curve_type, cloned_curve.curve_type);
+        assert_eq!(original_curve.initial_price, cloned_curve.initial_price);
+        assert_eq!(original_curve.slope, cloned_curve.slope);
+        
+        let original_params = SecurityParams::default();
+        let cloned_params = original_params.clone();
+        assert_eq!(original_params.max_trade_size, cloned_params.max_trade_size);
+        assert_eq!(original_params.anti_bot_enabled, cloned_params.anti_bot_enabled);
+        
+        let original_achievement = Achievement::new(1, 3);
+        let cloned_achievement = original_achievement.clone();
+        assert_eq!(original_achievement.id, cloned_achievement.id);
+        assert_eq!(original_achievement.tier, cloned_achievement.tier);
+    }
+
+    #[test]
+    fn test_bonding_curve_params_with_optional_damper() {
+        // Тест с volatility_damper = None
+        let params_none = BondingCurveParams {
+            curve_type: CurveType::Linear,
+            initial_supply: 1_000_000_000_000_000,
+            initial_price: 1000,
+            graduation_threshold: 50_000_000_000_000,
+            slope: 0.000001,
+            volatility_damper: None,
+        };
+        assert_eq!(params_none.volatility_damper, None);
+        
+        // Тест с volatility_damper = Some(value)
+        let params_some = BondingCurveParams {
+            curve_type: CurveType::Linear,
+            initial_supply: 1_000_000_000_000_000,
+            initial_price: 1000,
+            graduation_threshold: 50_000_000_000_000,
+            slope: 0.000001,
+            volatility_damper: Some(2.0),
+        };
+        assert_eq!(params_some.volatility_damper, Some(2.0));
+    }
+}

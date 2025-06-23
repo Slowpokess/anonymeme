@@ -112,62 +112,54 @@ export default function AnalyticsPage() {
 
   const loadMarketOverview = async () => {
     try {
-      // Мок-данные для демонстрации
-      const mockOverview: MarketOverview = {
-        total_tokens: 1247,
-        active_tokens: 856,
-        total_market_cap: 2450000,
-        total_volume_24h: 125000,
-        total_trades_24h: 3420,
-        average_price_change_24h: 5.2
+      const response = await apiService.getMarketOverview()
+      if (response.success) {
+        const overview: MarketOverview = {
+          total_tokens: response.data.total_tokens,
+          active_tokens: response.data.total_tokens, // Предполагаем что все активные
+          total_market_cap: parseFloat(response.data.total_market_cap || '0'),
+          total_volume_24h: parseFloat(response.data.total_volume_24h || '0'),
+          total_trades_24h: response.data.total_trades_24h,
+          average_price_change_24h: response.data.average_price_change_24h || 0
+        }
+        setMarketOverview(overview)
       }
-      setMarketOverview(mockOverview)
     } catch (error) {
       console.error('Failed to load market overview:', error)
+      // Fallback к мок-данным при ошибке
+      const mockOverview: MarketOverview = {
+        total_tokens: 0,
+        active_tokens: 0,
+        total_market_cap: 0,
+        total_volume_24h: 0,
+        total_trades_24h: 0,
+        average_price_change_24h: 0
+      }
+      setMarketOverview(mockOverview)
     }
   }
 
   const loadTopTokens = async () => {
     try {
-      // Мок-данные для демонстрации
-      const mockTopTokens: TopToken[] = [
-        {
-          id: '1',
-          name: 'PepeCoin',
-          symbol: 'PEPE',
-          image: '🐸',
-          current_price: 0.00152,
-          market_cap: 125000,
-          volume_24h: 15420,
-          price_change_24h: 12.5,
-          trades_24h: 234
-        },
-        {
-          id: '2', 
-          name: 'DogeKing',
-          symbol: 'DKING',
-          image: '👑',
-          current_price: 0.00089,
-          market_cap: 89000,
-          volume_24h: 8930,
-          price_change_24h: -3.2,
-          trades_24h: 156
-        },
-        {
-          id: '3',
-          name: 'MoonCat',
-          symbol: 'MCAT',
-          image: '🌙',
-          current_price: 0.00234,
-          market_cap: 67000,
-          volume_24h: 12340,
-          price_change_24h: 8.7,
-          trades_24h: 189
-        }
-      ]
-      setTopTokens(mockTopTokens)
+      const response = await apiService.getTrendingTokens()
+      if (response.success) {
+        const tokens: TopToken[] = response.data.slice(0, 10).map(token => ({
+          id: token.id,
+          name: token.name,
+          symbol: token.symbol,
+          image: token.image || '🪙',
+          current_price: parseFloat(token.current_price),
+          market_cap: parseFloat(token.market_cap),
+          volume_24h: parseFloat(token.volume_24h),
+          price_change_24h: token.price_change_24h,
+          trades_24h: token.total_trades
+        }))
+        setTopTokens(tokens)
+      }
     } catch (error) {
       console.error('Failed to load top tokens:', error)
+      // Fallback к пустому массиву при ошибке
+      setTopTokens([])
     }
   }
 
