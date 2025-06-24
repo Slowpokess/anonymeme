@@ -20,9 +20,9 @@ try:
     from solana.rpc.async_api import AsyncClient
     from solana.rpc.commitment import Confirmed, Finalized
     from solana.rpc.types import TxOpts
-    from solana.publickey import PublicKey
-    from solana.transaction import Transaction
-    from solana.system_program import transfer, TransferParams
+    from solders.pubkey import Pubkey as PublicKey
+    from solders.transaction import Transaction
+    from solders.system_program import transfer, TransferParams
     from solana.rpc.core import RPCException
     SOLANA_AVAILABLE = True
 except ImportError:
@@ -99,8 +99,8 @@ class SolanaService:
         self.rpc_url = rpc_url
         self.program_id = PublicKey(program_id)
         self.client: Optional[AsyncClient] = None
-        self.program: Optional[Program] = None
-        self.session: Optional[aiohttp.ClientSession] = None
+        self.program: Optional["Program"] = None
+        self.session: Optional["aiohttp.ClientSession"] = None
         
         # Кэш для часто запрашиваемых данных
         self._token_cache: Dict[str, TokenInfo] = {}
