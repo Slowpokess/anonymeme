@@ -1,4 +1,6 @@
-# 🚀 Docker Compose для Production окружения
+# 🚀 Production Docker Compose Override для Anonymeme Platform
+# Production-specific настройки и optimizations
+
 version: '3.8'
 
 services:

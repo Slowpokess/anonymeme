@@ -1,7 +1,5 @@
-# ===================================================================
-# Anonymeme Backend Dockerfile
-# Production-ready multi-stage build for FastAPI application
-# ===================================================================
+# 🐳 Backend Dockerfile для Anonymeme Platform
+# Multi-stage build для optimized production image=
 
 # === STAGE 1: Base image with Python ===
 FROM python:3.11-slim as base

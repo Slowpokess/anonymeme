@@ -1,0 +1,424 @@
+# 📢 Alertmanager Configuration для Anonymeme Platform
+# Конфигурация routing и notification для всех типов alert'ов
+
+global:
+  # SMTP configuration для email уведомлений
+  smtp_smarthost: '${SMTP_HOST:-localhost:587}'
+  smtp_from: '${ALERT_FROM_EMAIL:-alerts@anonymeme.io}'
+  smtp_auth_username: '${SMTP_USERNAME}'
+  smtp_auth_password: '${SMTP_PASSWORD}'
+  smtp_require_tls: true
+  
+  # Slack webhook URL
+  slack_api_url: '${SLACK_WEBHOOK_URL}'
+  
+  # Default notification settings
+  resolve_timeout: 5m
+
+# Routing tree - определяет куда отправлять какие alert'ы
+route:
+  # Default settings для всех alert'ов
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 10s        # Ждем 10 секунд перед отправкой группы
+  group_interval: 10s    # Интервал между группами
+  repeat_interval: 12h   # Повторяем alert каждые 12 часов если не resolved
+  receiver: 'default-notifications'
+  
+  # Специфические routes для разных типов alert'ов
+  routes:
+    # ===== CRITICAL ALERTS =====
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 0s          # Немедленная отправка для critical
+      group_interval: 5s
+      repeat_interval: 1h     # Повторяем каждый час для critical
+      routes:
+        # Critical system alerts - немедленно devops team
+        - match:
+            category: availability
+          receiver: 'devops-critical'
+          continue: true
+        
+        # Critical security alerts - security team + devops
+        - match:
+            category: security
+          receiver: 'security-critical'
+          continue: true
+        
+        # Critical business alerts - product team + leadership
+        - match:
+            category: business
+          receiver: 'business-critical'
+          continue: true
+
+    # ===== WARNING ALERTS =====
+    - match:
+        severity: warning
+      receiver: 'warning-alerts'
+      group_wait: 30s
+      group_interval: 30s
+      repeat_interval: 6h
+      routes:
+        # Performance warnings - performance team
+        - match:
+            category: performance
+          receiver: 'performance-team'
+        
+        # Security warnings - security team
+        - match:
+            category: security
+          receiver: 'security-team'
+        
+        # Infrastructure warnings - devops team
+        - match:
+            category: infrastructure
+          receiver: 'devops-team'
+
+    # ===== TEAM-SPECIFIC ROUTING =====
+    - match:
+        team: devops
+      receiver: 'devops-team'
+    
+    - match:
+        team: backend
+      receiver: 'backend-team'
+    
+    - match:
+        team: frontend
+      receiver: 'frontend-team'
+    
+    - match:
+        team: security
+      receiver: 'security-team'
+    
+    - match:
+        team: product
+      receiver: 'product-team'
+
+    # ===== ENVIRONMENT-SPECIFIC ROUTING =====
+    - match:
+        environment: production
+      receiver: 'production-alerts'
+      continue: true
+    
+    - match:
+        environment: staging
+      receiver: 'staging-alerts'
+      continue: true
+
+    # ===== BUSINESS HOURS VS AFTER HOURS =====
+    - match_re:
+        severity: critical|warning
+      receiver: 'after-hours-alerts'
+      active_time_intervals:
+        - after_hours
+      continue: true
+
+# Time intervals - определяем рабочие часы и выходные
+time_intervals:
+  - name: business_hours
+    time_intervals:
+      - times:
+        - start_time: '09:00'
+          end_time: '18:00'
+        weekdays: ['monday:friday']
+        location: 'America/Los_Angeles'
+  
+  - name: after_hours
+    time_intervals:
+      - times:
+        - start_time: '18:01'
+          end_time: '08:59'
+        weekdays: ['monday:friday']
+        location: 'America/Los_Angeles'
+      - times:
+        - start_time: '00:00'
+          end_time: '23:59'
+        weekdays: ['saturday', 'sunday']
+        location: 'America/Los_Angeles'
+
+# Receivers - конфигурация получателей уведомлений
+receivers:
+  # ===== DEFAULT RECEIVER =====
+  - name: 'default-notifications'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_DEFAULT}'
+        channel: '#alerts-general'
+        title: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Severity:* {{ .Labels.severity }}
+          *Service:* {{ .Labels.service }}
+          {{ end }}
+        send_resolved: true
+
+  # ===== CRITICAL ALERTS RECEIVER =====
+  - name: 'critical-alerts'
+    email_configs:
+      - to: '${CRITICAL_ALERTS_EMAIL:-critical@anonymeme.io}'
+        subject: '🚨 CRITICAL ALERT: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+        html: |
+          <h2>🚨 CRITICAL ALERT</h2>
+          {{ range .Alerts }}
+          <h3>{{ .Annotations.summary }}</h3>
+          <p><strong>Description:</strong> {{ .Annotations.description }}</p>
+          <p><strong>Service:</strong> {{ .Labels.service }}</p>
+          <p><strong>Environment:</strong> {{ .Labels.environment }}</p>
+          <p><strong>Time:</strong> {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}</p>
+          {{ if .Annotations.runbook }}
+          <p><strong>Runbook:</strong> <a href="{{ .Annotations.runbook }}">{{ .Annotations.runbook }}</a></p>
+          {{ end }}
+          {{ end }}
+        send_resolved: true
+    
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_CRITICAL}'
+        channel: '#alerts-critical'
+        color: 'danger'
+        title: '🚨 CRITICAL: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+        text: |
+          {{ range .Alerts }}
+          <!channel> *CRITICAL ALERT*
+          
+          *Summary:* {{ .Annotations.summary }}
+          *Service:* {{ .Labels.service }}
+          *Environment:* {{ .Labels.environment }}
+          
+          *Description:*
+          {{ .Annotations.description }}
+          
+          {{ if .Annotations.runbook }}*Runbook:* {{ .Annotations.runbook }}{{ end }}
+          {{ if .Annotations.dashboard }}*Dashboard:* {{ .Annotations.dashboard }}{{ end }}
+          {{ end }}
+        send_resolved: true
+
+  # ===== DEVOPS CRITICAL RECEIVER =====
+  - name: 'devops-critical'
+    email_configs:
+      - to: '${DEVOPS_EMAIL:-devops@anonymeme.io}'
+        subject: '🚨 DEVOPS CRITICAL: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+    
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_DEVOPS}'
+        channel: '#devops-critical'
+        color: 'danger'
+        title: '🚨 DEVOPS CRITICAL'
+        text: |
+          {{ range .Alerts }}
+          <!here> **IMMEDIATE ACTION REQUIRED**
+          
+          **Service:** {{ .Labels.service }}
+          **Issue:** {{ .Annotations.summary }}
+          **Environment:** {{ .Labels.environment }}
+          
+          {{ .Annotations.description }}
+          {{ end }}
+        send_resolved: true
+    
+    # PagerDuty integration для critical devops alerts
+    pagerduty_configs:
+      - routing_key: '${PAGERDUTY_DEVOPS_KEY}'
+        description: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+        severity: 'critical'
+        custom_details:
+          environment: '{{ .CommonLabels.environment }}'
+          service: '{{ .CommonLabels.service }}'
+          alert_count: '{{ len .Alerts }}'
+
+  # ===== SECURITY CRITICAL RECEIVER =====
+  - name: 'security-critical'
+    email_configs:
+      - to: '${SECURITY_EMAIL:-security@anonymeme.io}'
+        subject: '🔒 SECURITY CRITICAL: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+    
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_SECURITY}'
+        channel: '#security-alerts'
+        color: 'danger'
+        title: '🔒 SECURITY CRITICAL'
+        text: |
+          {{ range .Alerts }}
+          <!channel> **SECURITY INCIDENT**
+          
+          **Alert:** {{ .Annotations.summary }}
+          **Severity:** {{ .Labels.severity }}
+          **Environment:** {{ .Labels.environment }}
+          
+          {{ .Annotations.description }}
+          
+          **Immediate security review required**
+          {{ end }}
+        send_resolved: true
+    
+    # Security team PagerDuty
+    pagerduty_configs:
+      - routing_key: '${PAGERDUTY_SECURITY_KEY}'
+        description: 'SECURITY: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+        severity: 'critical'
+
+  # ===== BUSINESS CRITICAL RECEIVER =====
+  - name: 'business-critical'
+    email_configs:
+      - to: '${BUSINESS_EMAIL:-business@anonymeme.io}'
+        cc: '${LEADERSHIP_EMAIL:-leadership@anonymeme.io}'
+        subject: '💼 BUSINESS CRITICAL: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+    
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_BUSINESS}'
+        channel: '#business-alerts'
+        color: 'danger'
+        title: '💼 BUSINESS IMPACT'
+        text: |
+          {{ range .Alerts }}
+          **BUSINESS CRITICAL ALERT**
+          
+          **Impact:** {{ .Annotations.summary }}
+          **Service:** {{ .Labels.service }}
+          **Environment:** {{ .Labels.environment }}
+          
+          {{ .Annotations.description }}
+          
+          *This alert indicates potential revenue or user experience impact.*
+          {{ end }}
+        send_resolved: true
+
+  # ===== WARNING ALERTS RECEIVER =====
+  - name: 'warning-alerts'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_WARNINGS}'
+        channel: '#alerts-warnings'
+        color: 'warning'
+        title: '⚠️ Warning: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+        text: |
+          {{ range .Alerts }}
+          **Warning Alert**
+          
+          **Service:** {{ .Labels.service }}
+          **Issue:** {{ .Annotations.summary }}
+          **Environment:** {{ .Labels.environment }}
+          
+          {{ .Annotations.description }}
+          {{ end }}
+        send_resolved: true
+
+  # ===== TEAM-SPECIFIC RECEIVERS =====
+  - name: 'devops-team'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_DEVOPS}'
+        channel: '#devops-alerts'
+        title: '🔧 DevOps Alert'
+        send_resolved: true
+
+  - name: 'backend-team'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_BACKEND}'
+        channel: '#backend-alerts'
+        title: '⚙️ Backend Alert'
+        send_resolved: true
+
+  - name: 'frontend-team'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_FRONTEND}'
+        channel: '#frontend-alerts'
+        title: '🖥️ Frontend Alert'
+        send_resolved: true
+
+  - name: 'security-team'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_SECURITY}'
+        channel: '#security-alerts'
+        title: '🔒 Security Alert'
+        send_resolved: true
+
+  - name: 'product-team'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_PRODUCT}'
+        channel: '#product-alerts'
+        title: '📊 Product Alert'
+        send_resolved: true
+
+  - name: 'performance-team'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_PERFORMANCE}'
+        channel: '#performance-alerts'
+        title: '🚀 Performance Alert'
+        send_resolved: true
+
+  # ===== ENVIRONMENT-SPECIFIC RECEIVERS =====
+  - name: 'production-alerts'
+    email_configs:
+      - to: '${PRODUCTION_ALERTS_EMAIL:-production@anonymeme.io}'
+        subject: '🔴 PRODUCTION: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+    
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_PRODUCTION}'
+        channel: '#production-alerts'
+        color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
+        title: '🔴 PRODUCTION Alert'
+        send_resolved: true
+
+  - name: 'staging-alerts'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_STAGING}'
+        channel: '#staging-alerts'
+        color: '{{ if eq .Status "firing" }}warning{{ else }}good{{ end }}'
+        title: '🟡 STAGING Alert'
+        send_resolved: true
+
+  # ===== AFTER HOURS RECEIVER =====
+  - name: 'after-hours-alerts'
+    # Only critical alerts after hours trigger immediate notifications
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_ONCALL}'
+        channel: '#oncall-alerts'
+        color: 'danger'
+        title: '🌙 AFTER HOURS ALERT'
+        text: |
+          {{ range .Alerts }}
+          **AFTER HOURS ALERT**
+          
+          **Severity:** {{ .Labels.severity }}
+          **Service:** {{ .Labels.service }}
+          **Alert:** {{ .Annotations.summary }}
+          
+          {{ .Annotations.description }}
+          
+          {{ if eq .Labels.severity "critical" }}@channel {{ end }}
+          {{ end }}
+        send_resolved: true
+    
+    # PagerDuty for after-hours critical alerts
+    pagerduty_configs:
+      - routing_key: '${PAGERDUTY_ONCALL_KEY}'
+        description: 'AFTER HOURS: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+        severity: '{{ .CommonLabels.severity }}'
+
+# Inhibition rules - подавление менее важных alert'ов когда есть более важные
+inhibit_rules:
+  # Подавляем warning alert'ы если есть critical для того же сервиса
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['service', 'environment']
+  
+  # Подавляем performance alert'ы если сервис down
+  - source_match:
+      alertname: 'ServiceDown'
+    target_match_re:
+      category: 'performance|sla'
+    equal: ['service', 'instance']
+  
+  # Подавляем application alert'ы если есть system alert'ы
+  - source_match_re:
+      category: 'availability|infrastructure'
+    target_match_re:
+      category: 'application|business'
+    equal: ['service', 'environment']
+
+# Templates для custom notification formatting
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'

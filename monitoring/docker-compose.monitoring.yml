@@ -1,0 +1,403 @@
+# 📊 Docker Compose для полного мониторинга stack
+# Comprehensive monitoring setup для Anonymeme Platform
+
+version: '3.8'
+
+networks:
+  monitoring:
+    driver: bridge
+  app-network:
+    external: true
+
+volumes:
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+  alertmanager-data:
+    driver: local
+  postgres-exporter-data:
+    driver: local
+
+services:
+  # ===== PROMETHEUS - METRICS COLLECTION =====
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: anonymeme-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.size=50GB'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+      - '--log.level=info'
+      - '--query.timeout=30s'
+      - '--query.max-concurrency=20'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - ./prometheus/alerts:/etc/prometheus/alerts:ro
+      - prometheus-data:/prometheus
+    networks:
+      - monitoring
+      - app-network
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - AWS_REGION=${AWS_REGION:-us-west-2}
+      - METRICS_USERNAME=${METRICS_USERNAME:-metrics}
+      - METRICS_PASSWORD=${METRICS_PASSWORD:-metrics_secret}
+    labels:
+      - "prometheus.io/scrape=true"
+      - "prometheus.io/port=9090"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ===== ALERTMANAGER - ALERT ROUTING =====
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: anonymeme-alertmanager
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+      - '--log.level=info'
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./alertmanager/templates:/etc/alertmanager/templates:ro
+      - alertmanager-data:/alertmanager
+    networks:
+      - monitoring
+    environment:
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+      - SLACK_WEBHOOK_DEFAULT=${SLACK_WEBHOOK_DEFAULT}
+      - SLACK_WEBHOOK_CRITICAL=${SLACK_WEBHOOK_CRITICAL}
+      - SLACK_WEBHOOK_DEVOPS=${SLACK_WEBHOOK_DEVOPS}
+      - SLACK_WEBHOOK_SECURITY=${SLACK_WEBHOOK_SECURITY}
+      - SLACK_WEBHOOK_BUSINESS=${SLACK_WEBHOOK_BUSINESS}
+      - CRITICAL_ALERTS_EMAIL=${CRITICAL_ALERTS_EMAIL:-critical@anonymeme.io}
+      - DEVOPS_EMAIL=${DEVOPS_EMAIL:-devops@anonymeme.io}
+      - SECURITY_EMAIL=${SECURITY_EMAIL:-security@anonymeme.io}
+      - PAGERDUTY_DEVOPS_KEY=${PAGERDUTY_DEVOPS_KEY}
+      - PAGERDUTY_SECURITY_KEY=${PAGERDUTY_SECURITY_KEY}
+      - SMTP_HOST=${SMTP_HOST:-localhost:587}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===== GRAFANA - VISUALIZATION =====
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: anonymeme-grafana
+    restart: unless-stopped
+    ports:
+      - "3030:3000"  # Port 3030 чтобы не конфликтовать с frontend
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./grafana/grafana.ini:/etc/grafana/grafana.ini:ro
+    networks:
+      - monitoring
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin123}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel,grafana-clock-panel
+      - GF_SERVER_ROOT_URL=http://localhost:3030
+      - GF_SMTP_ENABLED=${GRAFANA_SMTP_ENABLED:-false}
+      - GF_SMTP_HOST=${SMTP_HOST:-localhost:587}
+      - GF_SMTP_USER=${SMTP_USERNAME}
+      - GF_SMTP_PASSWORD=${SMTP_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ===== NODE EXPORTER - SYSTEM METRICS =====
+  node-exporter:
+    image: prom/node-exporter:v1.6.1
+    container_name: anonymeme-node-exporter
+    restart: unless-stopped
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--collector.systemd'
+      - '--collector.processes'
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      - monitoring
+    pid: host
+
+  # ===== CADVISOR - CONTAINER METRICS =====
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.2
+    container_name: anonymeme-cadvisor
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - monitoring
+    privileged: true
+    devices:
+      - /dev/kmsg
+
+  # ===== POSTGRES EXPORTER - DATABASE METRICS =====
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: anonymeme-postgres-exporter
+    restart: unless-stopped
+    ports:
+      - "9187:9187"
+    environment:
+      - DATA_SOURCE_NAME=postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-password}@${DB_HOST:-postgres}:5432/${DB_NAME:-anonymeme}?sslmode=disable
+      - PG_EXPORTER_EXTEND_QUERY_PATH=/etc/postgres_exporter/queries.yaml
+    volumes:
+      - ./exporters/postgres-queries.yaml:/etc/postgres_exporter/queries.yaml:ro
+    networks:
+      - monitoring
+      - app-network
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9187/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===== REDIS EXPORTER - CACHE METRICS =====
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.55.0
+    container_name: anonymeme-redis-exporter
+    restart: unless-stopped
+    ports:
+      - "9121:9121"
+    environment:
+      - REDIS_ADDR=redis://${REDIS_HOST:-redis}:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+    networks:
+      - monitoring
+      - app-network
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9121/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===== BLACKBOX EXPORTER - EXTERNAL MONITORING =====
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.24.0
+    container_name: anonymeme-blackbox-exporter
+    restart: unless-stopped
+    ports:
+      - "9115:9115"
+    volumes:
+      - ./blackbox/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+    networks:
+      - monitoring
+    command:
+      - '--config.file=/etc/blackbox_exporter/config.yml'
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9115/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===== NGINX EXPORTER - LOAD BALANCER METRICS =====
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:0.11.0
+    container_name: anonymeme-nginx-exporter
+    restart: unless-stopped
+    ports:
+      - "9113:9113"
+    command:
+      - '-nginx.scrape-uri=http://nginx:8080/nginx_status'
+    networks:
+      - monitoring
+      - app-network
+    depends_on:
+      - nginx
+
+  # ===== CUSTOM SOLANA EXPORTER =====
+  solana-exporter:
+    build:
+      context: ./exporters/solana
+      dockerfile: Dockerfile
+    container_name: anonymeme-solana-exporter
+    restart: unless-stopped
+    ports:
+      - "9091:9090"
+    environment:
+      - SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://api.mainnet-beta.solana.com}
+      - SOLANA_WS_URL=${SOLANA_WS_URL:-wss://api.mainnet-beta.solana.com}
+      - CONTRACT_ADDRESS=${CONTRACT_ADDRESS}
+      - EXPORT_INTERVAL=30
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===== CUSTOM METRICS COLLECTOR =====
+  metrics-collector:
+    build:
+      context: ./collectors
+      dockerfile: Dockerfile
+    container_name: anonymeme-metrics-collector
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - METRICS_PORT=8080
+      - COLLECTION_INTERVAL=15
+    networks:
+      - monitoring
+      - app-network
+    volumes:
+      - ./collectors/config.yaml:/app/config.yaml:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===== PUSHGATEWAY - BATCH JOB METRICS =====
+  pushgateway:
+    image: prom/pushgateway:v1.6.2
+    container_name: anonymeme-pushgateway
+    restart: unless-stopped
+    ports:
+      - "9091:9091"
+    networks:
+      - monitoring
+    command:
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9091/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===== JAEGER - DISTRIBUTED TRACING =====
+  jaeger:
+    image: jaegertracing/all-in-one:1.51.0
+    container_name: anonymeme-jaeger
+    restart: unless-stopped
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "14268:14268"  # Jaeger HTTP API
+      - "6831:6831/udp"  # Jaeger agent UDP
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:16686/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===== ELASTICSEARCH - LOG STORAGE =====
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: anonymeme-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+      - xpack.security.enabled=false
+      - xpack.monitoring.collection.enabled=true
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ===== KIBANA - LOG VISUALIZATION =====
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: anonymeme-kibana
+    restart: unless-stopped
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - XPACK_SECURITY_ENABLED=false
+    networks:
+      - monitoring
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ===== LOGSTASH - LOG PROCESSING =====
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.11.0
+    container_name: anonymeme-logstash
+    restart: unless-stopped
+    volumes:
+      - ./logstash/pipeline:/usr/share/logstash/pipeline:ro
+      - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+    ports:
+      - "5044:5044"  # Beats input
+      - "9600:9600"  # Logstash monitoring API
+    networks:
+      - monitoring
+    depends_on:
+      - elasticsearch
+    environment:
+      - "LS_JAVA_OPTS=-Xms1g -Xmx1g"
+
+# External volumes для production данных
+volumes:
+  elasticsearch-data:
+    driver: local

@@ -1,0 +1,313 @@
+# ⚙️ Worker Deployment для Kubernetes (Celery Workers + Scheduler)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: anonymeme-worker
+  namespace: anonymeme
+  labels:
+    app: anonymeme-worker
+    component: worker
+    version: v1.0.0
+spec:
+  replicas: 4
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: anonymeme-worker
+  template:
+    metadata:
+      labels:
+        app: anonymeme-worker
+        component: worker
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8002"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: anonymeme-worker
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: worker
+        image: ghcr.io/anonymeme/backend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8002
+          name: metrics
+          protocol: TCP
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: anonymeme-secrets
+              key: database-url
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: anonymeme-secrets
+              key: redis-url
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: anonymeme-secrets
+              key: secret-key
+        - name: JWT_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: anonymeme-secrets
+              key: jwt-secret-key
+        - name: SOLANA_RPC_URL
+          valueFrom:
+            configMapKeyRef:
+              name: anonymeme-config
+              key: solana-rpc-url
+        - name: CONTRACT_ADDRESS
+          valueFrom:
+            configMapKeyRef:
+              name: anonymeme-config
+              key: contract-address
+        - name: ENVIRONMENT
+          value: "production"
+        - name: LOG_LEVEL
+          value: "warning"
+        - name: PYTHONPATH
+          value: "/app"
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: C_FORCE_ROOT
+          value: "1"
+        - name: WORKER_CONCURRENCY
+          value: "8"
+        - name: WORKER_PREFETCH_MULTIPLIER
+          value: "2"
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        command: ["celery"]
+        args: ["-A", "worker.celery_app", "worker", "--loglevel=warning", "--concurrency=8", "--prefetch-multiplier=2"]
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          exec:
+            command:
+            - celery
+            - -A
+            - worker.celery_app
+            - inspect
+            - ping
+          initialDelaySeconds: 60
+          periodSeconds: 60
+          timeoutSeconds: 30
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - celery
+            - -A
+            - worker.celery_app
+            - inspect
+            - active
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 15
+          failureThreshold: 3
+        volumeMounts:
+        - name: logs
+          mountPath: /app/logs
+        - name: keypairs
+          mountPath: /app/keypairs
+          readOnly: true
+      volumes:
+      - name: logs
+        emptyDir: {}
+      - name: keypairs
+        secret:
+          secretName: anonymeme-keypairs
+          defaultMode: 0600
+      imagePullSecrets:
+      - name: ghcr-secret
+---
+# Celery Beat Scheduler (отдельный deployment)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: anonymeme-scheduler
+  namespace: anonymeme
+  labels:
+    app: anonymeme-scheduler
+    component: scheduler
+    version: v1.0.0
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # Only one scheduler должен быть активным
+  selector:
+    matchLabels:
+      app: anonymeme-scheduler
+  template:
+    metadata:
+      labels:
+        app: anonymeme-scheduler
+        component: scheduler
+    spec:
+      serviceAccountName: anonymeme-worker
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: scheduler
+        image: ghcr.io/anonymeme/backend:latest
+        imagePullPolicy: Always
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: anonymeme-secrets
+              key: database-url
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: anonymeme-secrets
+              key: redis-url
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: anonymeme-secrets
+              key: secret-key
+        - name: ENVIRONMENT
+          value: "production"
+        - name: LOG_LEVEL
+          value: "warning"
+        - name: PYTHONPATH
+          value: "/app"
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: C_FORCE_ROOT
+          value: "1"
+        command: ["celery"]
+        args: ["-A", "worker.celery_app", "beat", "--loglevel=warning"]
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "250m"
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - "ps aux | grep -v grep | grep 'celery.*beat' || exit 1"
+          initialDelaySeconds: 60
+          periodSeconds: 60
+          timeoutSeconds: 10
+          failureThreshold: 3
+        volumeMounts:
+        - name: logs
+          mountPath: /app/logs
+        - name: celery-schedule
+          mountPath: /app/celerybeat-schedule
+      volumes:
+      - name: logs
+        emptyDir: {}
+      - name: celery-schedule
+        persistentVolumeClaim:
+          claimName: celery-schedule-pvc
+      imagePullSecrets:
+      - name: ghcr-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: anonymeme-worker-service
+  namespace: anonymeme
+  labels:
+    app: anonymeme-worker
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8002"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8002
+    targetPort: 8002
+    protocol: TCP
+    name: metrics
+  selector:
+    app: anonymeme-worker
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: anonymeme-worker
+  namespace: anonymeme
+  labels:
+    app: anonymeme-worker
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: anonymeme-worker-hpa
+  namespace: anonymeme
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: anonymeme-worker
+  minReplicas: 4
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 85
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 600  # Длинное окно для workers
+      policies:
+      - type: Percent
+        value: 25
+        periodSeconds: 120
+    scaleUp:
+      stabilizationWindowSeconds: 120
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 60
+---
+# Persistent Volume Claim для Celery Beat Schedule
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: celery-schedule-pvc
+  namespace: anonymeme
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: standard

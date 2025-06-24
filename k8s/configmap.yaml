@@ -1,0 +1,161 @@
+# 🔧 ConfigMap для Anonymeme Platform
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: anonymeme-config
+  namespace: anonymeme
+  labels:
+    app: anonymeme
+data:
+  # API URLs
+  api-url: "https://api.anonymeme.io"
+  websocket-url: "wss://ws.anonymeme.io"
+  frontend-url: "https://anonymeme.io"
+  
+  # Solana Configuration
+  solana-rpc-url: "https://api.mainnet-beta.solana.com"
+  solana-network: "mainnet-beta"
+  contract-address: "11111111111111111111111111111111"  # Placeholder - replace with actual
+  
+  # Redis Configuration
+  redis-host: "redis"
+  redis-port: "6379"
+  redis-db: "0"
+  
+  # Database Configuration
+  postgres-host: "postgres"
+  postgres-port: "5432"
+  postgres-db: "anonymeme"
+  postgres-user: "anonymeme"
+  
+  # Application Configuration
+  environment: "production"
+  log-level: "warning"
+  debug: "false"
+  
+  # Rate Limiting
+  rate-limit-per-minute: "100"
+  auth-rate-limit-per-minute: "10"
+  
+  # File Upload Settings
+  max-upload-size: "50MB"
+  allowed-file-types: "image/jpeg,image/png,image/gif,image/webp"
+  
+  # Session Configuration
+  session-timeout: "86400"  # 24 hours
+  
+  # CORS Settings
+  cors-origins: "https://anonymeme.io,https://www.anonymeme.io"
+  
+  # Monitoring
+  prometheus-metrics: "true"
+  metrics-port: "8000"
+  
+  # Celery Configuration
+  celery-broker-url: "redis://redis:6379/1"
+  celery-result-backend: "redis://redis:6379/2"
+  
+  # WebSocket Configuration
+  websocket-max-connections: "10000"
+  websocket-heartbeat-interval: "30"
+  
+  # Security Settings
+  secure-cookies: "true"
+  csrf-protection: "true"
+  
+  # Cache Configuration
+  cache-ttl: "3600"  # 1 hour
+  
+  # Business Logic Settings
+  min-token-price: "0.001"  # SOL
+  max-token-price: "1000"   # SOL
+  platform-fee-percentage: "2.5"
+  
+  # Trading Configuration
+  max-trade-amount: "100"   # SOL
+  min-trade-amount: "0.01"  # SOL
+  slippage-tolerance: "5"   # %
+  
+  # Backup Configuration
+  backup-retention-days: "30"
+  
+  # Timezone
+  timezone: "UTC"
+---
+# Environment-specific ConfigMap для staging
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: anonymeme-config-staging
+  namespace: anonymeme
+  labels:
+    app: anonymeme
+    environment: staging
+data:
+  # API URLs
+  api-url: "https://api-staging.anonymeme.io"
+  websocket-url: "wss://ws-staging.anonymeme.io"
+  frontend-url: "https://staging.anonymeme.io"
+  
+  # Solana Configuration (testnet)
+  solana-rpc-url: "https://api.testnet.solana.com"
+  solana-network: "testnet"
+  contract-address: "22222222222222222222222222222222"  # Placeholder - replace with testnet contract
+  
+  # Application Configuration
+  environment: "staging"
+  log-level: "info"
+  debug: "false"
+  
+  # Rate Limiting (более relaxed для testing)
+  rate-limit-per-minute: "200"
+  auth-rate-limit-per-minute: "20"
+  
+  # Business Logic Settings (тестовые значения)
+  min-token-price: "0.0001"  # SOL
+  max-token-price: "10"      # SOL
+  platform-fee-percentage: "1.0"
+  
+  # Trading Configuration
+  max-trade-amount: "10"     # SOL
+  min-trade-amount: "0.001"  # SOL
+  slippage-tolerance: "10"   # %
+---
+# Environment-specific ConfigMap для development
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: anonymeme-config-development
+  namespace: anonymeme
+  labels:
+    app: anonymeme
+    environment: development
+data:
+  # API URLs
+  api-url: "http://localhost:8000"
+  websocket-url: "ws://localhost:8001"
+  frontend-url: "http://localhost:3000"
+  
+  # Solana Configuration (devnet)
+  solana-rpc-url: "https://api.devnet.solana.com"
+  solana-network: "devnet"
+  contract-address: "33333333333333333333333333333333"  # Placeholder - replace with devnet contract
+  
+  # Application Configuration
+  environment: "development"
+  log-level: "debug"
+  debug: "true"
+  
+  # Rate Limiting (отключено для development)
+  rate-limit-per-minute: "1000"
+  auth-rate-limit-per-minute: "100"
+  
+  # Business Logic Settings (dev значения)
+  min-token-price: "0.00001"  # SOL
+  max-token-price: "1"        # SOL
+  platform-fee-percentage: "0.5"
+  
+  # Trading Configuration
+  max-trade-amount: "1"       # SOL
+  min-trade-amount: "0.0001"  # SOL
+  slippage-tolerance: "15"    # %

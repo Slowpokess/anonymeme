@@ -1,0 +1,219 @@
+# 📊 Application Rules для Prometheus
+# Правила агрегации и записи метрик для Anonymeme Platform
+
+groups:
+  # ===== APPLICATION PERFORMANCE RULES =====
+  - name: anonymeme.application.performance
+    interval: 30s
+    rules:
+      # API Response Time - среднее время ответа API за последние 5 минут
+      - record: anonymeme:api_response_time:mean5m
+        expr: rate(http_request_duration_seconds_sum{service="backend-api"}[5m]) / rate(http_request_duration_seconds_count{service="backend-api"}[5m])
+        labels:
+          metric_type: "performance"
+          aggregation: "mean"
+      
+      # API Request Rate - количество запросов в секунду
+      - record: anonymeme:api_request_rate:rate5m
+        expr: rate(http_requests_total{service="backend-api"}[5m])
+        labels:
+          metric_type: "throughput"
+      
+      # API Error Rate - процент ошибок
+      - record: anonymeme:api_error_rate:ratio5m
+        expr: rate(http_requests_total{service="backend-api",status=~"5.."}[5m]) / rate(http_requests_total{service="backend-api"}[5m])
+        labels:
+          metric_type: "reliability"
+      
+      # Database Connection Pool Usage
+      - record: anonymeme:db_pool_usage:ratio
+        expr: db_connections_active{service="database"} / db_connections_max{service="database"}
+        labels:
+          metric_type: "resource_usage"
+      
+      # Redis Memory Usage
+      - record: anonymeme:redis_memory_usage:ratio
+        expr: redis_memory_used_bytes{service="cache"} / redis_memory_max_bytes{service="cache"}
+        labels:
+          metric_type: "resource_usage"
+
+  # ===== BUSINESS METRICS RULES =====
+  - name: anonymeme.business.metrics
+    interval: 1m
+    rules:
+      # Total Trading Volume - общий объем торгов за период
+      - record: anonymeme:trading_volume:total5m
+        expr: increase(trading_volume_total[5m])
+        labels:
+          metric_type: "business"
+          category: "trading"
+      
+      # Active Users - количество активных пользователей
+      - record: anonymeme:active_users:count5m
+        expr: count(increase(user_activity_total[5m]) > 0)
+        labels:
+          metric_type: "business"
+          category: "users"
+      
+      # Token Creation Rate - скорость создания новых токенов
+      - record: anonymeme:token_creation:rate1h
+        expr: rate(tokens_created_total[1h])
+        labels:
+          metric_type: "business"
+          category: "tokens"
+      
+      # Transaction Success Rate - процент успешных транзакций
+      - record: anonymeme:transaction_success_rate:ratio5m
+        expr: rate(transactions_total{status="success"}[5m]) / rate(transactions_total[5m])
+        labels:
+          metric_type: "business"
+          category: "transactions"
+
+  # ===== SYSTEM RESOURCE RULES =====
+  - name: anonymeme.system.resources
+    interval: 30s
+    rules:
+      # CPU Usage by Service
+      - record: anonymeme:cpu_usage:by_service
+        expr: avg by (service) (rate(container_cpu_usage_seconds_total[5m]) * 100)
+        labels:
+          metric_type: "system"
+          resource: "cpu"
+      
+      # Memory Usage by Service
+      - record: anonymeme:memory_usage:by_service
+        expr: avg by (service) (container_memory_usage_bytes / container_spec_memory_limit_bytes * 100)
+        labels:
+          metric_type: "system"
+          resource: "memory"
+      
+      # Disk Usage
+      - record: anonymeme:disk_usage:ratio
+        expr: (node_filesystem_size_bytes - node_filesystem_free_bytes) / node_filesystem_size_bytes
+        labels:
+          metric_type: "system"
+          resource: "disk"
+      
+      # Network I/O Rate
+      - record: anonymeme:network_io:rate5m
+        expr: rate(node_network_receive_bytes_total[5m]) + rate(node_network_transmit_bytes_total[5m])
+        labels:
+          metric_type: "system"
+          resource: "network"
+
+  # ===== SOLANA BLOCKCHAIN RULES =====
+  - name: anonymeme.blockchain.solana
+    interval: 1m
+    rules:
+      # Solana RPC Response Time
+      - record: anonymeme:solana_rpc_latency:mean5m
+        expr: rate(solana_rpc_duration_seconds_sum[5m]) / rate(solana_rpc_duration_seconds_count[5m])
+        labels:
+          metric_type: "blockchain"
+          provider: "solana"
+      
+      # Transaction Confirmation Rate
+      - record: anonymeme:solana_tx_confirmation_rate:ratio5m
+        expr: rate(solana_transactions_confirmed_total[5m]) / rate(solana_transactions_submitted_total[5m])
+        labels:
+          metric_type: "blockchain"
+          provider: "solana"
+      
+      # Smart Contract Calls
+      - record: anonymeme:smart_contract_calls:rate5m
+        expr: rate(smart_contract_calls_total[5m])
+        labels:
+          metric_type: "blockchain"
+          provider: "solana"
+
+  # ===== SECURITY METRICS RULES =====
+  - name: anonymeme.security.metrics
+    interval: 1m
+    rules:
+      # Failed Authentication Rate
+      - record: anonymeme:auth_failures:rate5m
+        expr: rate(auth_attempts_total{status="failed"}[5m])
+        labels:
+          metric_type: "security"
+          category: "authentication"
+      
+      # Rate Limiting Hits
+      - record: anonymeme:rate_limit_hits:rate5m
+        expr: rate(rate_limit_hits_total[5m])
+        labels:
+          metric_type: "security"
+          category: "rate_limiting"
+      
+      # Suspicious Activity Score
+      - record: anonymeme:suspicious_activity:score5m
+        expr: rate(suspicious_activity_events_total[5m]) * 100
+        labels:
+          metric_type: "security"
+          category: "threat_detection"
+
+  # ===== AVAILABILITY AND SLA RULES =====
+  - name: anonymeme.sla.availability
+    interval: 1m
+    rules:
+      # Service Availability (based on successful health checks)
+      - record: anonymeme:service_availability:ratio5m
+        expr: avg_over_time(up[5m])
+        labels:
+          metric_type: "sla"
+          category: "availability"
+      
+      # API SLA Compliance (< 200ms response time)
+      - record: anonymeme:api_sla_compliance:ratio5m
+        expr: |
+          (
+            rate(http_request_duration_seconds_bucket{service="backend-api",le="0.2"}[5m]) /
+            rate(http_request_duration_seconds_count{service="backend-api"}[5m])
+          )
+        labels:
+          metric_type: "sla"
+          category: "performance"
+      
+      # Error Budget Burn Rate (4 hours)
+      - record: anonymeme:error_budget_burn_rate:4h
+        expr: |
+          (
+            1 - (
+              (rate(http_requests_total{service="backend-api",status!~"5.."}[4h])) /
+              (rate(http_requests_total{service="backend-api"}[4h]))
+            )
+          ) / (1 - 0.999)  # Assuming 99.9% SLA target
+        labels:
+          metric_type: "sla"
+          category: "error_budget"
+
+  # ===== DEPLOYMENT AND INFRASTRUCTURE RULES =====
+  - name: anonymeme.infrastructure.deployment
+    interval: 30s
+    rules:
+      # Blue-Green Deployment Health
+      - record: anonymeme:deployment_health:by_color
+        expr: avg by (environment_color) (up{service="backend-api"})
+        labels:
+          metric_type: "deployment"
+      
+      # Container Restart Rate
+      - record: anonymeme:container_restarts:rate5m
+        expr: rate(container_start_time_seconds[5m])
+        labels:
+          metric_type: "infrastructure"
+          category: "stability"
+      
+      # Resource Utilization Trend
+      - record: anonymeme:resource_trend:cpu_1h
+        expr: deriv(anonymeme:cpu_usage:by_service[1h])
+        labels:
+          metric_type: "infrastructure"
+          category: "trends"
+          resource: "cpu"
+      
+      - record: anonymeme:resource_trend:memory_1h
+        expr: deriv(anonymeme:memory_usage:by_service[1h])
+        labels:
+          metric_type: "infrastructure"
+          category: "trends"
+          resource: "memory"

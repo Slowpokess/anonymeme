@@ -1,0 +1,385 @@
+# ⚠️ Warning Alerts для Anonymeme Platform
+# Warning alerts для предотвращения критических ситуаций
+
+groups:
+  # ===== WARNING SYSTEM ALERTS =====
+  - name: anonymeme.warning.system
+    rules:
+      # Moderate CPU Usage
+      - alert: ModeratelyHighCPUUsage
+        expr: anonymeme:cpu_usage:by_service > 70
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+          team: devops
+        annotations:
+          summary: "⚠️ Moderately high CPU usage on {{ $labels.service }}"
+          description: |
+            CPU usage for service {{ $labels.service }} is {{ $value | humanizePercentage }} for more than 10 minutes.
+            
+            Current CPU: {{ $value | humanizePercentage }}
+            Warning threshold: 70%
+            Critical threshold: 90%
+            
+            Consider investigating performance optimization or scaling.
+
+      # Moderate Memory Usage
+      - alert: ModeratelyHighMemoryUsage
+        expr: anonymeme:memory_usage:by_service > 70
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+          team: devops
+        annotations:
+          summary: "💾 Moderately high memory usage on {{ $labels.service }}"
+          description: |
+            Memory usage for service {{ $labels.service }} is {{ $value | humanizePercentage }} for more than 10 minutes.
+            
+            Monitor for potential memory leaks or consider scaling.
+
+      # Disk Space Warning
+      - alert: DiskSpaceWarning
+        expr: anonymeme:disk_usage:ratio > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          category: storage
+          team: devops
+        annotations:
+          summary: "💽 High disk usage on {{ $labels.instance }}"
+          description: |
+            Disk usage is {{ $value | humanizePercentage }} on instance {{ $labels.instance }}.
+            
+            Consider cleanup or expansion before reaching critical level (95%).
+
+      # High Network I/O
+      - alert: HighNetworkIO
+        expr: anonymeme:network_io:rate5m > 100 * 1024 * 1024  # 100 MB/s
+        for: 5m
+        labels:
+          severity: warning
+          category: network
+          team: devops
+        annotations:
+          summary: "🌐 High network I/O detected"
+          description: |
+            Network I/O rate is {{ $value | humanizeBytes }}/s on {{ $labels.instance }}.
+            
+            Monitor for potential network bottlenecks or unusual traffic patterns.
+
+  # ===== WARNING APPLICATION ALERTS =====
+  - name: anonymeme.warning.application
+    rules:
+      # API Response Time Warning
+      - alert: APIResponseTimeHigh
+        expr: anonymeme:api_response_time:mean5m > 1
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+          team: backend
+        annotations:
+          summary: "🐌 API response time elevated"
+          description: |
+            Average API response time is {{ $value | humanizeDuration }} for the last 5 minutes.
+            
+            Response time: {{ $value | humanizeDuration }}
+            Warning threshold: 1 second
+            SLA target: <200ms
+            
+            Consider performance optimization or scaling.
+
+      # Moderate Error Rate
+      - alert: ModerateErrorRate
+        expr: anonymeme:api_error_rate:ratio5m > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          category: reliability
+          team: backend
+        annotations:
+          summary: "⚠️ Elevated API error rate"
+          description: |
+            API error rate is {{ $value | humanizePercentage }} for the last 5 minutes.
+            
+            Error rate: {{ $value | humanizePercentage }}
+            Warning threshold: 5%
+            Critical threshold: 10%
+            
+            Monitor for potential issues and investigate error logs.
+
+      # Database Connection Pool Warning
+      - alert: DatabaseConnectionPoolHigh
+        expr: anonymeme:db_pool_usage:ratio > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          category: database
+          team: backend
+        annotations:
+          summary: "🗄️ Database connection pool usage high"
+          description: |
+            Database connection pool usage is {{ $value | humanizePercentage }}.
+            
+            Monitor for connection leaks and consider pool size adjustment.
+
+      # Redis Memory Warning
+      - alert: RedisMemoryHigh
+        expr: anonymeme:redis_memory_usage:ratio > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          category: cache
+          team: backend
+        annotations:
+          summary: "🔴 Redis memory usage elevated"
+          description: |
+            Redis memory usage is {{ $value | humanizePercentage }}.
+            
+            Consider memory optimization or increasing limits.
+
+  # ===== WARNING BUSINESS ALERTS =====
+  - name: anonymeme.warning.business
+    rules:
+      # Trading Volume Decline
+      - alert: TradingVolumeDecline
+        expr: anonymeme:trading_volume:total5m < (avg_over_time(anonymeme:trading_volume:total5m[1h]) * 0.5)
+        for: 15m
+        labels:
+          severity: warning
+          category: business
+          team: product
+        annotations:
+          summary: "📉 Trading volume below expected levels"
+          description: |
+            Trading volume has been {{ $value }} for the last 5 minutes.
+            
+            Current: {{ $value }}
+            Expected: >{{ avg_over_time(anonymeme:trading_volume:total5m[1h]) * 0.5 }}
+            
+            Monitor for platform issues or market conditions.
+
+      # User Activity Decline
+      - alert: UserActivityDecline
+        expr: anonymeme:active_users:count5m < (avg_over_time(anonymeme:active_users:count5m[4h]) * 0.7)
+        for: 20m
+        labels:
+          severity: warning
+          category: business
+          team: product
+        annotations:
+          summary: "👥 User activity below normal levels"
+          description: |
+            Active user count is {{ $value }} which is below expected levels.
+            
+            This may indicate user experience issues or external factors.
+
+      # Token Creation Rate Low
+      - alert: TokenCreationRateLow
+        expr: anonymeme:token_creation:rate1h < 0.5
+        for: 30m
+        labels:
+          severity: warning
+          category: business
+          team: product
+        annotations:
+          summary: "🪙 Token creation rate unusually low"
+          description: |
+            Token creation rate is {{ $value | humanize }} tokens/hour.
+            
+            Monitor for potential issues in token creation flow.
+
+  # ===== WARNING SECURITY ALERTS =====
+  - name: anonymeme.warning.security
+    rules:
+      # Elevated Authentication Failures
+      - alert: ElevatedAuthenticationFailures
+        expr: anonymeme:auth_failures:rate5m > 2
+        for: 5m
+        labels:
+          severity: warning
+          category: security
+          team: security
+        annotations:
+          summary: "🔒 Elevated authentication failure rate"
+          description: |
+            Authentication failure rate is {{ $value | humanize }} failures/second.
+            
+            Monitor for potential security threats or system issues.
+
+      # Rate Limiting Active
+      - alert: RateLimitingActive
+        expr: anonymeme:rate_limit_hits:rate5m > 1
+        for: 10m
+        labels:
+          severity: warning
+          category: security
+          team: backend
+        annotations:
+          summary: "🚦 Rate limiting frequently triggered"
+          description: |
+            Rate limiting is being triggered {{ $value | humanize }} times/second.
+            
+            This may indicate:
+            - High legitimate traffic
+            - Potential abuse
+            - Need for rate limit adjustment
+
+      # Moderate Suspicious Activity
+      - alert: ModerateSuspiciousActivity
+        expr: anonymeme:suspicious_activity:score5m > 10
+        for: 10m
+        labels:
+          severity: warning
+          category: security
+          team: security
+        annotations:
+          summary: "🔍 Elevated suspicious activity detected"
+          description: |
+            Suspicious activity score is {{ $value }} events/minute.
+            
+            Monitor for patterns and consider additional security measures.
+
+  # ===== WARNING BLOCKCHAIN ALERTS =====
+  - name: anonymeme.warning.blockchain
+    rules:
+      # Solana RPC Latency Warning
+      - alert: SolanaRPCLatencyWarning
+        expr: anonymeme:solana_rpc_latency:mean5m > 2
+        for: 5m
+        labels:
+          severity: warning
+          category: blockchain
+          team: blockchain
+        annotations:
+          summary: "⛓️ Solana RPC latency elevated"
+          description: |
+            Solana RPC average latency is {{ $value | humanizeDuration }}.
+            
+            Latency: {{ $value | humanizeDuration }}
+            Warning threshold: 2 seconds
+            Critical threshold: 5 seconds
+            
+            Monitor RPC provider performance.
+
+      # Transaction Confirmation Rate Warning
+      - alert: TransactionConfirmationRateWarning
+        expr: anonymeme:solana_tx_confirmation_rate:ratio5m < 0.9
+        for: 10m
+        labels:
+          severity: warning
+          category: blockchain
+          team: blockchain
+        annotations:
+          summary: "⚠️ Solana transaction confirmation rate suboptimal"
+          description: |
+            Transaction confirmation rate is {{ $value | humanizePercentage }}.
+            
+            Confirmation rate: {{ $value | humanizePercentage }}
+            Warning threshold: 90%
+            Critical threshold: 80%
+            
+            Monitor Solana network congestion.
+
+      # Smart Contract Call Rate High
+      - alert: SmartContractCallRateHigh
+        expr: anonymeme:smart_contract_calls:rate5m > 100
+        for: 10m
+        labels:
+          severity: warning
+          category: blockchain
+          team: blockchain
+        annotations:
+          summary: "📈 High smart contract call rate"
+          description: |
+            Smart contract call rate is {{ $value | humanize }} calls/second.
+            
+            Monitor for potential spam or unusual activity patterns.
+
+  # ===== WARNING PERFORMANCE ALERTS =====
+  - name: anonymeme.warning.performance
+    rules:
+      # SLA Performance Warning
+      - alert: SLAPerformanceWarning
+        expr: anonymeme:api_sla_compliance:ratio5m < 0.95
+        for: 10m
+        labels:
+          severity: warning
+          category: sla
+          team: sre
+        annotations:
+          summary: "📊 SLA performance below target"
+          description: |
+            API SLA compliance is {{ $value | humanizePercentage }}.
+            
+            Current compliance: {{ $value | humanizePercentage }}
+            Target: >95% of requests <200ms
+            
+            Performance optimization may be needed.
+
+      # Error Budget Consumption Warning
+      - alert: ErrorBudgetConsumptionWarning
+        expr: anonymeme:error_budget_burn_rate:4h > 5
+        for: 15m
+        labels:
+          severity: warning
+          category: sla
+          team: sre
+        annotations:
+          summary: "⚠️ Error budget consuming faster than expected"
+          description: |
+            Error budget is burning at {{ $value }}x the expected rate.
+            
+            At this rate, monthly error budget will be exhausted in {{ 720 / $value | humanizeDuration }}.
+            
+            Monitor error trends and consider preventive measures.
+
+  # ===== WARNING INFRASTRUCTURE ALERTS =====
+  - name: anonymeme.warning.infrastructure
+    rules:
+      # Container Restart Warning
+      - alert: ContainerRestartWarning
+        expr: anonymeme:container_restarts:rate5m > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          category: infrastructure
+          team: devops
+        annotations:
+          summary: "🔄 Containers restarting more frequently"
+          description: |
+            Containers are restarting at {{ $value | humanize }} restarts/second.
+            
+            Monitor for potential instability or resource issues.
+
+      # Deployment Color Imbalance
+      - alert: DeploymentColorImbalance
+        expr: abs(anonymeme:deployment_health:by_color{environment_color="blue"} - anonymeme:deployment_health:by_color{environment_color="green"}) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          category: deployment
+          team: devops
+        annotations:
+          summary: "⚖️ Blue-green deployment imbalance detected"
+          description: |
+            Health difference between blue and green environments is significant.
+            
+            This may indicate issues with one of the deployment environments.
+
+      # Resource Trend Warning
+      - alert: ResourceTrendWarning
+        expr: abs(anonymeme:resource_trend:cpu_1h) > 0.1
+        for: 20m
+        labels:
+          severity: warning
+          category: infrastructure
+          team: devops
+        annotations:
+          summary: "📈 Resource usage trend anomaly"
+          description: |
+            {{ $labels.resource }} usage trend shows significant change: {{ $value | humanizePercentage }}/hour.
+            
+            Monitor for potential capacity planning needs.

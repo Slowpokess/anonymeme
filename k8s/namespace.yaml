@@ -1,0 +1,64 @@
+# 🚀 Kubernetes Namespace для Anonymeme Platform
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: anonymeme
+  labels:
+    app: anonymeme
+    environment: production
+    version: v1.0.0
+  annotations:
+    description: "Anonymeme Platform Production Namespace"
+    contact: "devops@anonymeme.io"
+---
+# Resource Quotas для production environment
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: anonymeme-quota
+  namespace: anonymeme
+spec:
+  hard:
+    requests.cpu: "10"
+    requests.memory: 20Gi
+    limits.cpu: "20" 
+    limits.memory: 40Gi
+    persistentvolumeclaims: "10"
+    services: "20"
+    secrets: "20"
+    configmaps: "20"
+---
+# Network Policies для security
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: anonymeme-network-policy
+  namespace: anonymeme
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: anonymeme
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: anonymeme
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 53
+    - protocol: UDP  
+      port: 53
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 80

@@ -1,0 +1,266 @@
+# 📊 Prometheus Configuration для Anonymeme Platform
+# Comprehensive monitoring configuration for всех компонентов системы
+
+global:
+  # Scrape интервал по умолчанию - каждые 15 секунд для high-frequency мониторинга
+  scrape_interval: 15s
+  
+  # Evaluation интервал для rules - каждые 15 секунд
+  evaluation_interval: 15s
+  
+  # Общие labels для всех метрик
+  external_labels:
+    cluster: 'anonymeme-platform'
+    environment: '${ENVIRONMENT:-development}'
+    region: '${AWS_REGION:-us-west-2}'
+
+# Rule files configuration - автоматическая загрузка всех правил
+rule_files:
+  - "rules/*.yml"
+  - "alerts/*.yml"
+
+# Alertmanager configuration для отправки уведомлений
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+      scheme: http
+      timeout: 10s
+      api_version: v2
+
+# Scrape configurations - настройка сбора метрик со всех компонентов
+scrape_configs:
+
+  # ===== PROMETHEUS SELF-MONITORING =====
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 5s
+    metrics_path: /metrics
+
+  # ===== BACKEND API MONITORING =====
+  - job_name: 'anonymeme-backend'
+    static_configs:
+      - targets: 
+        - 'backend:8000'
+        - 'backend-blue:8000'   # Blue environment
+        - 'backend-green:8001'  # Green environment
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+    scrape_timeout: 8s
+    honor_labels: true
+    params:
+      format: ['prometheus']
+    # Basic auth для protected metrics endpoints
+    basic_auth:
+      username: '${METRICS_USERNAME:-metrics}'
+      password: '${METRICS_PASSWORD:-metrics_secret}'
+    # Custom labels для идентификации сервисов
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+      - source_labels: [__address__]
+        regex: '.*-blue:.*'
+        target_label: environment_color
+        replacement: 'blue'
+      - source_labels: [__address__]
+        regex: '.*-green:.*'
+        target_label: environment_color
+        replacement: 'green'
+      - target_label: service
+        replacement: 'backend-api'
+
+  # ===== FRONTEND MONITORING =====
+  - job_name: 'anonymeme-frontend'
+    static_configs:
+      - targets:
+        - 'frontend:3000'
+        - 'frontend-blue:3000'
+        - 'frontend-green:3001'
+    metrics_path: '/api/metrics'
+    scrape_interval: 30s
+    honor_labels: true
+    relabel_configs:
+      - target_label: service
+        replacement: 'frontend'
+
+  # ===== DATABASE MONITORING =====
+  # PostgreSQL Exporter для мониторинга базы данных
+  - job_name: 'postgresql'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    scrape_interval: 30s
+    relabel_configs:
+      - target_label: service
+        replacement: 'database'
+      - target_label: database_type
+        replacement: 'postgresql'
+
+  # ===== REDIS MONITORING =====
+  # Redis Exporter для мониторинга кеша
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    scrape_interval: 30s
+    relabel_configs:
+      - target_label: service
+        replacement: 'cache'
+      - target_label: cache_type
+        replacement: 'redis'
+
+  # ===== NODE EXPORTER - SYSTEM METRICS =====
+  # Мониторинг системных ресурсов (CPU, Memory, Disk, Network)
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: 
+        - 'node-exporter:9100'
+    scrape_interval: 15s
+    relabel_configs:
+      - target_label: service
+        replacement: 'system'
+
+  # ===== CADVISOR - CONTAINER METRICS =====
+  # Мониторинг Docker контейнеров
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    scrape_interval: 15s
+    metrics_path: /metrics
+    relabel_configs:
+      - target_label: service
+        replacement: 'containers'
+
+  # ===== NGINX/LOAD BALANCER MONITORING =====
+  - job_name: 'nginx'
+    static_configs:
+      - targets: ['nginx-exporter:9113']
+    scrape_interval: 15s
+    relabel_configs:
+      - target_label: service
+        replacement: 'load-balancer'
+
+  # ===== SOLANA RPC MONITORING =====
+  # Custom exporter для мониторинга Solana RPC подключений
+  - job_name: 'solana-rpc'
+    static_configs:
+      - targets: ['solana-exporter:9090']
+    scrape_interval: 30s
+    scrape_timeout: 25s
+    relabel_configs:
+      - target_label: service
+        replacement: 'blockchain'
+      - target_label: blockchain_type
+        replacement: 'solana'
+
+  # ===== BLACKBOX EXPORTER - EXTERNAL MONITORING =====
+  # Мониторинг внешних эндпоинтов и health checks
+  - job_name: 'blackbox-http'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+        - https://api.mainnet-beta.solana.com      # Solana Mainnet
+        - https://api.devnet.solana.com            # Solana Devnet
+        - ${EXTERNAL_API_ENDPOINT:-https://api.anonymeme.io}  # Our public API
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+      - target_label: service
+        replacement: 'external-dependencies'
+
+  # ===== SSL CERTIFICATE MONITORING =====
+  - job_name: 'blackbox-ssl'
+    metrics_path: /probe
+    params:
+      module: [tcp_connect]
+    static_configs:
+      - targets:
+        - ${DOMAIN:-anonymeme.io}:443
+        - api.${DOMAIN:-anonymeme.io}:443
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+      - target_label: service
+        replacement: 'ssl-certificates'
+
+  # ===== CUSTOM APPLICATION METRICS =====
+  # Пользовательские метрики приложения
+  - job_name: 'anonymeme-custom-metrics'
+    static_configs:
+      - targets: ['metrics-collector:8080']
+    scrape_interval: 30s
+    metrics_path: '/custom-metrics'
+    relabel_configs:
+      - target_label: service
+        replacement: 'application-metrics'
+
+  # ===== TRADING VOLUME METRICS =====
+  # Специальные метрики для торговой активности
+  - job_name: 'trading-metrics'
+    static_configs:
+      - targets: ['backend:8000']
+    metrics_path: '/metrics/trading'
+    scrape_interval: 5s  # High frequency для торговых метрик
+    scrape_timeout: 4s
+    relabel_configs:
+      - target_label: service
+        replacement: 'trading'
+      - target_label: metric_type
+        replacement: 'business'
+
+  # ===== SMART CONTRACT EVENTS =====
+  # Мониторинг events от смарт-контрактов
+  - job_name: 'smart-contract-events'
+    static_configs:
+      - targets: ['contract-indexer:9090']
+    scrape_interval: 10s
+    relabel_configs:
+      - target_label: service
+        replacement: 'smart-contracts'
+      - target_label: blockchain
+        replacement: 'solana'
+
+  # ===== SECURITY METRICS =====
+  # Метрики безопасности и аудита
+  - job_name: 'security-metrics'
+    static_configs:
+      - targets: ['security-monitor:8080']
+    scrape_interval: 60s  # Менее частый сбор для security metrics
+    metrics_path: '/security/metrics'
+    relabel_configs:
+      - target_label: service
+        replacement: 'security'
+
+# ===== REMOTE WRITE CONFIGURATION =====
+# Конфигурация для отправки метрик в внешние системы (опционально)
+remote_write:
+  # Пример конфигурации для AWS CloudWatch или Grafana Cloud
+  # - url: "https://prometheus-prod-10-prod-us-central-0.grafana.net/api/prom/push"
+  #   basic_auth:
+  #     username: "${GRAFANA_CLOUD_USER}"
+  #     password: "${GRAFANA_CLOUD_API_KEY}"
+  #   write_relabel_configs:
+  #     - source_labels: [__name__]
+  #       regex: 'anonymeme_.*'
+  #       action: keep
+
+# ===== STORAGE CONFIGURATION =====
+# Конфигурация хранения данных
+storage:
+  tsdb:
+    # Retention period - храним данные 30 дней
+    retention.time: 30d
+    # Retention size - максимум 50GB
+    retention.size: 50GB
+    # Compression - включаем сжатие для экономии места
+    wal-compression: true

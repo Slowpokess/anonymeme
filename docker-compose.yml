@@ -1,195 +1,228 @@
-# 🐳 Default Docker Compose для Anonymeme Platform
-# Для development используйте: docker-compose -f docker-compose.development.yml up -d
-# Этот файл остается для обратной совместимости
+# 🐳 Docker Compose для Anonymeme Platform
+# Complete containerization solution для всех компонентов системы
 
 version: '3.8'
 
+# ===== SHARED NETWORKS =====
+networks:
+  app-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+  monitoring:
+    external: true
+    name: anonymeme_monitoring
+  blockchain:
+    driver: bridge
+
+# ===== PERSISTENT VOLUMES =====
+volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
+  nginx-config:
+    driver: local
+  node-modules-cache:
+    driver: local
+  rust-cache:
+    driver: local
+
+# ===== SERVICES =====
 services:
-  # PostgreSQL Database
+  # ===== DATABASE =====
   postgres:
     image: postgres:15-alpine
+    container_name: anonymeme-postgres
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: crypto_pump_anon
-      POSTGRES_USER: devuser
-      POSTGRES_PASSWORD: devpass
-      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=C"
+      POSTGRES_DB: ${DB_NAME:-anonymeme}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=en_US.UTF-8 --lc-ctype=en_US.UTF-8"
+      PGDATA: /var/lib/postgresql/data/pgdata
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./scripts/database/init.sql:/docker-entrypoint-initdb.d/init.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U devuser -d crypto_pump_anon"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d:ro
+      - ./database/backups:/backups
     networks:
-      - anonymeme-default
+      - app-network
+    command: >
+      postgres 
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c work_mem=4MB
+      -c maintenance_work_mem=64MB
+      -c random_page_cost=1.1
+      -c temp_file_limit=2GB
+      -c log_min_duration_statement=1000
+      -c log_checkpoints=on
+      -c log_connections=on
+      -c log_disconnections=on
+      -c log_lock_waits=on
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-anonymeme}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    labels:
+      - "traefik.enable=false"
 
-  # Redis Cache
+  # ===== REDIS CACHE =====
   redis:
     image: redis:7-alpine
+    container_name: anonymeme-redis
+    restart: unless-stopped
+    command: >
+      redis-server 
+      --requirepass ${REDIS_PASSWORD:-redis_password}
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --appendonly yes
+      --appendfsync everysec
     ports:
-      - "6379:6379"
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - redis-data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
     networks:
-      - anonymeme-default
+      - app-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      - "traefik.enable=false"
 
-  # Backend API
+  # ===== BACKEND API =====
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env.example
+      args:
+        - ENVIRONMENT=${ENVIRONMENT:-development}
+        - BUILD_VERSION=${BUILD_VERSION:-latest}
+    image: anonymeme/backend:${BUILD_VERSION:-latest}
+    container_name: anonymeme-backend
+    restart: unless-stopped
     environment:
-      - DATABASE_URL=postgresql://devuser:devpass@postgres:5432/crypto_pump_anon
-      - REDIS_URL=redis://redis:6379
-      - SOLANA_RPC_URL=https://api.devnet.solana.com
-      - ENVIRONMENT=development
-      - DEBUG=true
-      - PYTHONPATH=/app
-      - PYTHONUNBUFFERED=1
+      # Database Configuration
+      - DATABASE_URL=postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-password}@postgres:5432/${DB_NAME:-anonymeme}
+      - DB_POOL_SIZE=${DB_POOL_SIZE:-20}
+      - DB_MAX_OVERFLOW=${DB_MAX_OVERFLOW:-30}
+      
+      # Redis Configuration
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379
+      - REDIS_MAX_CONNECTIONS=${REDIS_MAX_CONNECTIONS:-20}
+      
+      # Application Configuration
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - SECRET_KEY=${SECRET_KEY}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+      
+      # Solana Configuration
+      - SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://api.mainnet-beta.solana.com}
+      - SOLANA_WS_URL=${SOLANA_WS_URL:-wss://api.mainnet-beta.solana.com}
+      - CONTRACT_ADDRESS=${CONTRACT_ADDRESS}
+      - KEYPAIR_PATH=${KEYPAIR_PATH:-/app/keypairs/deployer.json}
+      
+      # Security Configuration
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,https://anonymeme.io}
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-60}
+      - MAX_REQUEST_SIZE=${MAX_REQUEST_SIZE:-10485760}
+      
+      # Monitoring
+      - PROMETHEUS_METRICS=${PROMETHEUS_METRICS:-true}
+      - JAEGER_ENABLED=${JAEGER_ENABLED:-true}
+      - JAEGER_AGENT_HOST=jaeger
+      - JAEGER_AGENT_PORT=6831
+      
+      # Email Configuration (if needed)
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./backend/keypairs:/app/keypairs:ro
+      - ./backend/logs:/app/logs
+      - ./backend/uploads:/app/uploads
+    networks:
+      - app-network
+      - blockchain
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    volumes:
-      - ./backend:/app
-      - ./contracts/pump-core/target/idl:/app/idl
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-    networks:
-      - anonymeme-default
+      start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=Host(`api.${DOMAIN:-localhost}`)"
+      - "traefik.http.routers.backend.entrypoints=websecure"
+      - "traefik.http.routers.backend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.backend.loadbalancer.server.port=8000"
+      - "prometheus.io/scrape=true"
+      - "prometheus.io/port=8000"
+      - "prometheus.io/path=/metrics"
 
-  # Frontend
+  # ===== FRONTEND =====
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
-    env_file:
-      - .env.example
+      args:
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        - NEXT_PUBLIC_ENVIRONMENT=${ENVIRONMENT:-development}
+        - NEXT_PUBLIC_SOLANA_NETWORK=${SOLANA_NETWORK:-mainnet-beta}
+        - BUILD_VERSION=${BUILD_VERSION:-latest}
+    image: anonymeme/frontend:${BUILD_VERSION:-latest}
+    container_name: anonymeme-frontend
+    restart: unless-stopped
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
-      - NEXT_PUBLIC_WS_URL=ws://localhost:8001
-      - NEXT_PUBLIC_SOLANA_RPC_URL=https://api.devnet.solana.com
-      - NEXT_PUBLIC_ENVIRONMENT=development
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      - NEXT_PUBLIC_ENVIRONMENT=${ENVIRONMENT:-development}
+      - NEXT_PUBLIC_SOLANA_NETWORK=${SOLANA_NETWORK:-mainnet-beta}
+      - NEXT_PUBLIC_CONTRACT_ADDRESS=${CONTRACT_ADDRESS}
+      - NEXT_PUBLIC_ANALYTICS_ID=${ANALYTICS_ID}
+      - NODE_ENV=${NODE_ENV:-production}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
     volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
-    command: npm run dev
+      - node-modules-cache:/app/.next/cache
+      - ./frontend/public:/app/public:ro
+    networks:
+      - app-network
     depends_on:
       - backend
-    networks:
-      - anonymeme-default
-
-  # WebSocket Service
-  websocket:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.websocket
-    ports:
-      - "8001:8001"
-    env_file:
-      - .env.example
-    environment:
-      - REDIS_URL=redis://redis:6379
-      - SOLANA_RPC_URL=https://api.devnet.solana.com
-      - PYTHONPATH=/app
-      - PYTHONUNBUFFERED=1
-    depends_on:
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./backend:/app
-    networks:
-      - anonymeme-default
-
-  # Celery Worker
-  worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    env_file:
-      - .env.example
-    environment:
-      - DATABASE_URL=postgresql://devuser:devpass@postgres:5432/crypto_pump_anon
-      - REDIS_URL=redis://redis:6379
-      - SOLANA_RPC_URL=https://api.devnet.solana.com
-      - PYTHONPATH=/app
-      - PYTHONUNBUFFERED=1
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./backend:/app
-    command: celery -A worker.celery_app worker --loglevel=info --concurrency=2
-    networks:
-      - anonymeme-default
-
-  # Prometheus (Monitoring)
-  prometheus:
-    image: prom/prometheus:latest
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./infrastructure/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=7d'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--web.enable-lifecycle'
-    networks:
-      - anonymeme-default
-
-  # Grafana (Dashboards)
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3001:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./infrastructure/monitoring/grafana:/etc/grafana/provisioning:ro
-    networks:
-      - anonymeme-default
-
-volumes:
-  postgres_data:
-    driver: local
-  redis_data:
-    driver: local
-  prometheus_data:
-    driver: local
-  grafana_data:
-    driver: local
-
-networks:
-  anonymeme-default:
-    driver: bridge
-    name: anonymeme-default-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`${DOMAIN:-localhost}`)"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
+      - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"

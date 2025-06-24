@@ -1,0 +1,487 @@
+name: "🚀 Continuous Deployment"
+on:
+  repository_dispatch:
+    types: [deploy-staging, deploy-production]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      version:
+        description: 'Version to deploy (commit SHA or tag)'
+        required: true
+        default: 'main'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ===== PREPARE DEPLOYMENT =====
+  prepare:
+    name: 🔧 Prepare Deployment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.set-environment.outputs.environment }}
+      version: ${{ steps.set-version.outputs.version }}
+      registry-url: ${{ steps.set-registry.outputs.registry-url }}
+      should-deploy: ${{ steps.checks.outputs.should-deploy }}
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.client_payload.ref || inputs.version }}
+
+      - name: 🎯 Set Environment
+        id: set-environment
+        run: |
+          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
+            ENV="${{ github.event.client_payload.environment }}"
+          else
+            ENV="${{ inputs.environment }}"
+          fi
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+          echo "🎯 Target environment: $ENV"
+
+      - name: 📌 Set Version
+        id: set-version
+        run: |
+          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
+            VERSION="${{ github.event.client_payload.sha }}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📌 Deploy version: $VERSION"
+
+      - name: 🏭 Set Registry
+        id: set-registry
+        run: |
+          echo "registry-url=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" >> $GITHUB_OUTPUT
+
+      - name: ✅ Pre-deployment Checks
+        id: checks
+        run: |
+          # Check if this is a valid deployment
+          ENV="${{ steps.set-environment.outputs.environment }}"
+          
+          if [[ "$ENV" == "production" ]] && [[ "${{ github.ref }}" != "refs/heads/main" ]]; then
+            echo "❌ Production deployments only allowed from main branch"
+            echo "should-deploy=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          echo "should-deploy=true" >> $GITHUB_OUTPUT
+          echo "✅ Pre-deployment checks passed"
+
+  # ===== BUILD IMAGES =====
+  build:
+    name: 🏗️ Build Images
+    runs-on: ubuntu-latest
+    needs: prepare
+    if: needs.prepare.outputs.should-deploy == 'true'
+    outputs:
+      backend_image: ${{ steps.meta-backend.outputs.tags }}
+      frontend_image: ${{ steps.meta-frontend.outputs.tags }}
+      image_digest: ${{ steps.build-backend.outputs.digest }}
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.version }}
+
+      - name: 🔧 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔑 Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📋 Extract Backend Metadata
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ needs.prepare.outputs.registry-url }}-backend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=${{ needs.prepare.outputs.environment }}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: 📋 Extract Frontend Metadata
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ needs.prepare.outputs.registry-url }}-frontend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=${{ needs.prepare.outputs.environment }}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: 🏗️ Build and Push Backend
+        id: build-backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            ENVIRONMENT=${{ needs.prepare.outputs.environment }}
+
+      - name: 🏗️ Build and Push Frontend
+        id: build-frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            ENVIRONMENT=${{ needs.prepare.outputs.environment }}
+
+      - name: 🔍 Security Scan Images
+        run: |
+          # Install Trivy
+          sudo apt-get update
+          sudo apt-get install wget apt-transport-https gnupg lsb-release
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install trivy
+          
+          # Scan backend image
+          trivy image ${{ steps.meta-backend.outputs.tags }} --format json --output backend-scan.json
+          trivy image ${{ steps.meta-backend.outputs.tags }} --exit-code 1 --severity HIGH,CRITICAL
+          
+          # Scan frontend image
+          trivy image ${{ steps.meta-frontend.outputs.tags }} --format json --output frontend-scan.json
+          trivy image ${{ steps.meta-frontend.outputs.tags }} --exit-code 1 --severity HIGH,CRITICAL
+
+      - name: 📊 Upload Scan Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-scans
+          path: |
+            backend-scan.json
+            frontend-scan.json
+
+  # ===== DEPLOY TO STAGING =====
+  deploy-staging:
+    name: 🧪 Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [prepare, build]
+    if: needs.prepare.outputs.environment == 'staging'
+    environment:
+      name: 'staging'
+      url: 'https://staging.anonymeme.io'
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Environment
+        run: |
+          # Create staging environment configuration
+          cp .env.staging .env.deploy
+          echo "BACKEND_IMAGE=${{ needs.build.outputs.backend_image }}" >> .env.deploy
+          echo "FRONTEND_IMAGE=${{ needs.build.outputs.frontend_image }}" >> .env.deploy
+
+      - name: 🔑 Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: 🗂️ Setup Secrets
+        run: |
+          # Retrieve secrets from AWS Secrets Manager
+          python scripts/secrets/secrets-manager.py \
+            --provider aws \
+            --environment staging \
+            --export
+
+      - name: 🐳 Deploy with Docker Compose
+        run: |
+          # Stop existing services
+          docker-compose -f docker-compose.staging.yml down || true
+          
+          # Pull latest images
+          docker-compose -f docker-compose.staging.yml pull
+          
+          # Start services
+          docker-compose -f docker-compose.staging.yml up -d
+          
+          # Wait for services to be healthy
+          sleep 30
+
+      - name: 🏥 Health Check
+        run: |
+          # Check backend health
+          curl -f https://staging-api.anonymeme.io/health || exit 1
+          
+          # Check frontend
+          curl -f https://staging.anonymeme.io || exit 1
+          
+          echo "✅ Staging deployment healthy"
+
+      - name: 🧪 Run Smoke Tests
+        run: |
+          # Run basic smoke tests
+          python scripts/testing/smoke_tests.py --environment staging
+
+      - name: 📊 Update Deployment Status
+        if: always()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const status = '${{ job.status }}' === 'success' ? 'success' : 'failure';
+            
+            github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: '${{ github.run_id }}',
+              state: status,
+              environment_url: 'https://staging.anonymeme.io',
+              description: status === 'success' ? 'Staging deployment successful' : 'Staging deployment failed'
+            });
+
+  # ===== DEPLOY TO PRODUCTION =====
+  deploy-production:
+    name: 🚀 Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [prepare, build]
+    if: needs.prepare.outputs.environment == 'production'
+    environment:
+      name: 'production'
+      url: 'https://anonymeme.io'
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: ⚠️ Production Deployment Confirmation
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { data: { login } } = await github.rest.users.getAuthenticated();
+            
+            core.info(`🚨 PRODUCTION DEPLOYMENT INITIATED by ${login}`);
+            core.info(`📦 Version: ${{ needs.prepare.outputs.version }}`);
+            core.info(`🖼️ Image: ${{ needs.build.outputs.backend_image }}`);
+
+      - name: 🔧 Setup Production Environment
+        run: |
+          # Create production environment configuration
+          cp .env.production .env.deploy
+          echo "BACKEND_IMAGE=${{ needs.build.outputs.backend_image }}" >> .env.deploy
+          echo "FRONTEND_IMAGE=${{ needs.build.outputs.frontend_image }}" >> .env.deploy
+
+      - name: 🔑 Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_PROD }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}
+          aws-region: us-west-2
+
+      - name: 🗂️ Setup Production Secrets
+        run: |
+          # Retrieve production secrets from AWS Secrets Manager
+          python scripts/secrets/secrets-manager.py \
+            --provider aws \
+            --environment production \
+            --export
+
+      - name: 💾 Create Backup
+        run: |
+          # Create database backup before deployment
+          python scripts/deployment/backup_database.py --environment production
+
+      - name: 🔄 Blue-Green Deployment
+        run: |
+          # Implement blue-green deployment strategy
+          python scripts/deployment/blue_green_deploy.py \
+            --environment production \
+            --backend_image "${{ needs.build.outputs.backend_image }}" \
+            --frontend_image "${{ needs.build.outputs.frontend_image }}"
+
+      - name: 🏥 Production Health Check
+        run: |
+          # Comprehensive health checks
+          python scripts/deployment/health_check.py --environment production
+          
+          # Check all critical endpoints
+          curl -f https://api.anonymeme.io/health || exit 1
+          curl -f https://anonymeme.io || exit 1
+          
+          echo "✅ Production deployment healthy"
+
+      - name: 📈 Performance Validation
+        run: |
+          # Run performance tests to ensure no regression
+          python scripts/testing/performance_tests.py --environment production
+
+      - name: 🧪 Post-Deployment Tests
+        run: |
+          # Run comprehensive post-deployment tests
+          python scripts/testing/post_deployment_tests.py --environment production
+
+      - name: 📊 Update Monitoring
+        run: |
+          # Update monitoring dashboards and alerts
+          python scripts/monitoring/update_dashboards.py --environment production
+
+  # ===== POST-DEPLOYMENT =====
+  post-deployment:
+    name: 📊 Post-Deployment
+    runs-on: ubuntu-latest
+    needs: [prepare, deploy-staging, deploy-production]
+    if: always() && (needs.deploy-staging.result == 'success' || needs.deploy-production.result == 'success')
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📊 Generate Deployment Report
+        run: |
+          # Generate comprehensive deployment report
+          python scripts/deployment/generate_report.py \
+            --environment "${{ needs.prepare.outputs.environment }}" \
+            --version "${{ needs.prepare.outputs.version }}" \
+            --backend_image "${{ needs.build.outputs.backend_image }}" \
+            --frontend_image "${{ needs.build.outputs.frontend_image }}"
+
+      - name: 🔔 Notify Team
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const env = '${{ needs.prepare.outputs.environment }}';
+            const version = '${{ needs.prepare.outputs.version }}';
+            const status = '${{ needs.deploy-staging.result || needs.deploy-production.result }}';
+            const url = env === 'production' ? 'https://anonymeme.io' : 'https://staging.anonymeme.io';
+            
+            const emoji = status === 'success' ? '🎉' : '❌';
+            const message = status === 'success' ? 'successful' : 'failed';
+            
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `${emoji} ${env.charAt(0).toUpperCase() + env.slice(1)} Deployment ${message.charAt(0).toUpperCase() + message.slice(1)}`,
+              body: `
+                ## ${emoji} Deployment ${message.charAt(0).toUpperCase() + message.slice(1)}
+                
+                **Environment:** ${env}
+                **Version:** ${version}
+                **URL:** ${url}
+                **Status:** ${status}
+                
+                ### 📦 Deployed Images
+                - Backend: ${{ needs.build.outputs.backend_image }}
+                - Frontend: ${{ needs.build.outputs.frontend_image }}
+                
+                ### 🔗 Links
+                - [Application](${url})
+                - [API Health](${url.replace('://', '://api.')}/health)
+                - [Monitoring Dashboard](${url}/monitoring)
+                
+                ### 📊 Deployment Metrics
+                - Deployment Time: ${new Date().toISOString()}
+                - Run ID: [#${context.runNumber}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+                
+                ${status === 'success' ? '✅' : '❌'} Deployment ${message}
+                
+                /cc @team-devops @team-backend @team-frontend
+              `,
+              labels: ['deployment', status, env]
+            });
+
+      - name: 📈 Update Metrics
+        if: success()
+        run: |
+          # Update deployment metrics
+          python scripts/monitoring/update_deployment_metrics.py \
+            --environment "${{ needs.prepare.outputs.environment }}" \
+            --status "success" \
+            --version "${{ needs.prepare.outputs.version }}"
+
+  # ===== ROLLBACK (if needed) =====
+  rollback:
+    name: 🔄 Rollback
+    runs-on: ubuntu-latest
+    if: failure() && (needs.deploy-staging.result == 'failure' || needs.deploy-production.result == 'failure')
+    needs: [prepare, deploy-staging, deploy-production]
+    environment:
+      name: ${{ needs.prepare.outputs.environment }}-rollback
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: ⚠️ Rollback Initiation
+        run: |
+          echo "🚨 ROLLBACK INITIATED for ${{ needs.prepare.outputs.environment }}"
+          echo "📦 Failed version: ${{ needs.prepare.outputs.version }}"
+
+      - name: 🔄 Execute Rollback
+        run: |
+          # Execute rollback to previous stable version
+          python scripts/deployment/rollback.py \
+            --environment "${{ needs.prepare.outputs.environment }}" \
+            --reason "deployment_failure"
+
+      - name: 🏥 Post-Rollback Health Check
+        run: |
+          # Verify rollback was successful
+          python scripts/deployment/health_check.py \
+            --environment "${{ needs.prepare.outputs.environment }}"
+
+      - name: 📝 Rollback Notification
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 ROLLBACK EXECUTED - ${{ needs.prepare.outputs.environment }}`,
+              body: `
+                ## 🚨 Emergency Rollback Executed
+                
+                **Environment:** ${{ needs.prepare.outputs.environment }}
+                **Failed Version:** ${{ needs.prepare.outputs.version }}
+                **Rollback Time:** ${new Date().toISOString()}
+                **Reason:** Deployment failure
+                
+                ### 🔍 Investigation Required
+                - [ ] Review deployment logs
+                - [ ] Identify root cause
+                - [ ] Fix issues in code
+                - [ ] Plan redeployment
+                
+                ### 📊 Incident Details
+                - Run ID: [#${context.runNumber}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+                - Environment Status: Rolled back to previous stable version
+                
+                **URGENT:** @team-devops @team-lead
+              `,
+              labels: ['rollback', 'urgent', 'incident', '${{ needs.prepare.outputs.environment }}']
+            });

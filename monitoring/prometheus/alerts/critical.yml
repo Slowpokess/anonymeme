@@ -1,0 +1,335 @@
+# 🚨 Critical Alerts для Anonymeme Platform
+# Critical alerts которые требуют немедленного вмешательства
+
+groups:
+  # ===== CRITICAL SYSTEM ALERTS =====
+  - name: anonymeme.critical.system
+    rules:
+      # Service Down - сервис недоступен
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: availability
+          team: devops
+        annotations:
+          summary: "🚨 Service {{ $labels.instance }} is down"
+          description: |
+            Service {{ $labels.job }} on instance {{ $labels.instance }} has been down for more than 1 minute.
+            
+            Impact: Service unavailable to users
+            Action Required: Immediate investigation and restart
+            
+            Runbook: https://docs.anonymeme.io/runbooks/service-down
+            Dashboard: https://grafana.anonymeme.io/d/service-overview
+
+      # High CPU Usage - критическое использование CPU
+      - alert: HighCPUUsage
+        expr: anonymeme:cpu_usage:by_service > 90
+        for: 5m
+        labels:
+          severity: critical
+          category: performance
+          team: devops
+        annotations:
+          summary: "🔥 High CPU usage on {{ $labels.service }}"
+          description: |
+            CPU usage for service {{ $labels.service }} is {{ $value | humanizePercentage }} for more than 5 minutes.
+            
+            Current CPU: {{ $value | humanizePercentage }}
+            Threshold: 90%
+            
+            This may lead to service degradation or timeouts.
+            Consider scaling up or investigating performance issues.
+
+      # High Memory Usage - критическое использование памяти
+      - alert: HighMemoryUsage
+        expr: anonymeme:memory_usage:by_service > 90
+        for: 5m
+        labels:
+          severity: critical
+          category: performance
+          team: devops
+        annotations:
+          summary: "💾 High memory usage on {{ $labels.service }}"
+          description: |
+            Memory usage for service {{ $labels.service }} is {{ $value | humanizePercentage }} for more than 5 minutes.
+            
+            This may lead to OOM kills and service restarts.
+            Immediate action required to prevent service interruption.
+
+      # Disk Space Critical - критическое место на диске
+      - alert: DiskSpaceCritical
+        expr: anonymeme:disk_usage:ratio > 0.95
+        for: 2m
+        labels:
+          severity: critical
+          category: storage
+          team: devops
+        annotations:
+          summary: "💽 Critical disk space on {{ $labels.instance }}"
+          description: |
+            Disk usage is {{ $value | humanizePercentage }} on instance {{ $labels.instance }}.
+            
+            Only {{ (1 - $value) | humanizePercentage }} space remaining.
+            Service may stop working when disk is full.
+            
+            Immediate cleanup or disk expansion required.
+
+  # ===== CRITICAL APPLICATION ALERTS =====
+  - name: anonymeme.critical.application
+    rules:
+      # High Error Rate - высокий процент ошибок
+      - alert: HighErrorRate
+        expr: anonymeme:api_error_rate:ratio5m > 0.1
+        for: 2m
+        labels:
+          severity: critical
+          category: reliability
+          team: backend
+        annotations:
+          summary: "⚠️ High error rate in API"
+          description: |
+            API error rate is {{ $value | humanizePercentage }} for more than 2 minutes.
+            
+            Error Rate: {{ $value | humanizePercentage }}
+            Threshold: 10%
+            
+            This indicates a serious issue affecting user experience.
+            Check logs and recent deployments.
+
+      # Database Connection Pool Exhausted
+      - alert: DatabaseConnectionPoolExhausted
+        expr: anonymeme:db_pool_usage:ratio > 0.95
+        for: 1m
+        labels:
+          severity: critical
+          category: database
+          team: backend
+        annotations:
+          summary: "🗄️ Database connection pool almost exhausted"
+          description: |
+            Database connection pool usage is {{ $value | humanizePercentage }}.
+            
+            Active connections: {{ $value * 100 }}%
+            Available: {{ (1 - $value) * 100 }}%
+            
+            New requests may start failing soon.
+            Check for connection leaks or increase pool size.
+
+      # Redis Memory Critical
+      - alert: RedisMemoryCritical
+        expr: anonymeme:redis_memory_usage:ratio > 0.95
+        for: 2m
+        labels:
+          severity: critical
+          category: cache
+          team: backend
+        annotations:
+          summary: "🔴 Redis memory usage critical"
+          description: |
+            Redis memory usage is {{ $value | humanizePercentage }}.
+            
+            Redis may start evicting keys or become unresponsive.
+            Consider increasing memory limit or clearing old data.
+
+  # ===== CRITICAL BUSINESS ALERTS =====
+  - name: anonymeme.critical.business
+    rules:
+      # Transaction Success Rate Too Low
+      - alert: TransactionSuccessRateLow
+        expr: anonymeme:transaction_success_rate:ratio5m < 0.95
+        for: 3m
+        labels:
+          severity: critical
+          category: business
+          team: product
+        annotations:
+          summary: "💸 Transaction success rate critically low"
+          description: |
+            Transaction success rate is {{ $value | humanizePercentage }} for more than 3 minutes.
+            
+            Success Rate: {{ $value | humanizePercentage }}
+            Expected: >95%
+            
+            This directly impacts user experience and revenue.
+            Check Solana RPC health and transaction processing.
+
+      # Trading Volume Anomaly - аномальное падение объема торгов
+      - alert: TradingVolumeAnomalyLow
+        expr: anonymeme:trading_volume:total5m < (avg_over_time(anonymeme:trading_volume:total5m[1h]) * 0.1)
+        for: 10m
+        labels:
+          severity: critical
+          category: business
+          team: product
+        annotations:
+          summary: "📉 Trading volume critically low"
+          description: |
+            Trading volume has dropped to {{ $value }} in the last 5 minutes.
+            
+            Current: {{ $value }}
+            Expected: >{{ avg_over_time(anonymeme:trading_volume:total5m[1h]) * 0.1 }}
+            
+            This may indicate a platform issue affecting trading functionality.
+
+  # ===== CRITICAL SECURITY ALERTS =====
+  - name: anonymeme.critical.security
+    rules:
+      # High Rate of Failed Authentication
+      - alert: HighAuthenticationFailureRate
+        expr: anonymeme:auth_failures:rate5m > 10
+        for: 2m
+        labels:
+          severity: critical
+          category: security
+          team: security
+        annotations:
+          summary: "🔒 High authentication failure rate detected"
+          description: |
+            Authentication failure rate is {{ $value | humanize }} failures/second.
+            
+            This may indicate:
+            - Brute force attack
+            - Authentication system issues
+            - Credential stuffing attempt
+            
+            Review authentication logs and consider temporary rate limiting.
+
+      # Suspicious Activity Spike
+      - alert: SuspiciousActivitySpike
+        expr: anonymeme:suspicious_activity:score5m > 50
+        for: 1m
+        labels:
+          severity: critical
+          category: security
+          team: security
+        annotations:
+          summary: "🚨 Suspicious activity spike detected"
+          description: |
+            Suspicious activity score is {{ $value }} events/minute.
+            
+            This may indicate malicious activity or security incident.
+            Immediate security team review required.
+
+  # ===== CRITICAL BLOCKCHAIN ALERTS =====
+  - name: anonymeme.critical.blockchain
+    rules:
+      # Solana RPC High Latency
+      - alert: SolanaRPCHighLatency
+        expr: anonymeme:solana_rpc_latency:mean5m > 5
+        for: 3m
+        labels:
+          severity: critical
+          category: blockchain
+          team: blockchain
+        annotations:
+          summary: "⛓️ Solana RPC latency critically high"
+          description: |
+            Solana RPC average latency is {{ $value | humanizeDuration }} for more than 3 minutes.
+            
+            Latency: {{ $value | humanizeDuration }}
+            Threshold: 5 seconds
+            
+            This severely impacts transaction processing and user experience.
+            Check RPC provider health or switch to backup RPC.
+
+      # Low Transaction Confirmation Rate
+      - alert: LowTransactionConfirmationRate
+        expr: anonymeme:solana_tx_confirmation_rate:ratio5m < 0.8
+        for: 5m
+        labels:
+          severity: critical
+          category: blockchain
+          team: blockchain
+        annotations:
+          summary: "❌ Low Solana transaction confirmation rate"
+          description: |
+            Transaction confirmation rate is {{ $value | humanizePercentage }} for more than 5 minutes.
+            
+            Confirmation Rate: {{ $value | humanizePercentage }}
+            Expected: >80%
+            
+            Many transactions are failing to confirm, affecting user operations.
+
+  # ===== CRITICAL SLA ALERTS =====
+  - name: anonymeme.critical.sla
+    rules:
+      # SLA Breach - доступность ниже целевого уровня
+      - alert: SLAAvailabilityBreach
+        expr: anonymeme:service_availability:ratio5m < 0.999
+        for: 1m
+        labels:
+          severity: critical
+          category: sla
+          team: devops
+        annotations:
+          summary: "📊 SLA availability breach"
+          description: |
+            Service availability is {{ $value | humanizePercentage }} which is below 99.9% SLA target.
+            
+            Current Availability: {{ $value | humanizePercentage }}
+            SLA Target: 99.9%
+            
+            This is a contractual SLA breach requiring immediate attention.
+
+      # Error Budget Burn Rate Too High
+      - alert: ErrorBudgetBurnRateHigh
+        expr: anonymeme:error_budget_burn_rate:4h > 10
+        for: 2m
+        labels:
+          severity: critical
+          category: sla
+          team: sre
+        annotations:
+          summary: "🔥 Error budget burning too fast"
+          description: |
+            Error budget is burning at {{ $value }}x the expected rate.
+            
+            At this rate, monthly error budget will be exhausted in {{ 720 / $value | humanizeDuration }}.
+            
+            Immediate action required to prevent SLA breach.
+
+  # ===== CRITICAL DEPLOYMENT ALERTS =====
+  - name: anonymeme.critical.deployment
+    rules:
+      # Deployment Health Issue
+      - alert: DeploymentHealthCritical
+        expr: anonymeme:deployment_health:by_color < 1
+        for: 5m
+        labels:
+          severity: critical
+          category: deployment
+          team: devops
+        annotations:
+          summary: "🚀 Deployment health issue in {{ $labels.environment_color }} environment"
+          description: |
+            {{ $labels.environment_color }} environment health is {{ $value | humanizePercentage }}.
+            
+            This may indicate:
+            - Failed deployment
+            - Service startup issues
+            - Configuration problems
+            
+            Blue-green deployment may need rollback.
+
+      # High Container Restart Rate
+      - alert: HighContainerRestartRate
+        expr: anonymeme:container_restarts:rate5m > 0.1
+        for: 3m
+        labels:
+          severity: critical
+          category: infrastructure
+          team: devops
+        annotations:
+          summary: "🔄 High container restart rate"
+          description: |
+            Containers are restarting at {{ $value | humanize }} restarts/second.
+            
+            This indicates:
+            - Application crashes
+            - Resource constraints
+            - Configuration issues
+            
+            Service stability is compromised.

@@ -1,0 +1,270 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "📊 Anonymeme Platform - System Overview",
+    "tags": ["anonymeme", "system", "overview"],
+    "style": "dark",
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "🚦 Service Health Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "up{job=~\"anonymeme.*\"}",
+            "legendFormat": "{{service}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "mappings": [
+              {
+                "options": {
+                  "0": {
+                    "text": "DOWN",
+                    "color": "red"
+                  },
+                  "1": {
+                    "text": "UP",
+                    "color": "green"
+                  }
+                },
+                "type": "value"
+              }
+            ],
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "red",
+                  "value": null
+                },
+                {
+                  "color": "green",
+                  "value": 1
+                }
+              ]
+            }
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 2,
+        "title": "📈 API Request Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "anonymeme:api_request_rate:rate5m",
+            "legendFormat": "{{method}} {{endpoint}}"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Requests/sec",
+            "min": 0
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 0
+        }
+      },
+      {
+        "id": 3,
+        "title": "⏱️ API Response Time",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "anonymeme:api_response_time:mean5m",
+            "legendFormat": "Average Response Time"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Seconds",
+            "min": 0
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 8
+        }
+      },
+      {
+        "id": 4,
+        "title": "❌ Error Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "anonymeme:api_error_rate:ratio5m * 100",
+            "legendFormat": "Error Rate %"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Percentage",
+            "min": 0,
+            "max": 100
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 8
+        }
+      },
+      {
+        "id": 5,
+        "title": "💾 System Resources",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "anonymeme:cpu_usage:by_service",
+            "legendFormat": "CPU - {{service}}"
+          },
+          {
+            "expr": "anonymeme:memory_usage:by_service",
+            "legendFormat": "Memory - {{service}}"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Percentage",
+            "min": 0,
+            "max": 100
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 24,
+          "x": 0,
+          "y": 16
+        }
+      },
+      {
+        "id": 6,
+        "title": "💸 Trading Volume",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "anonymeme:trading_volume:total5m",
+            "legendFormat": "Trading Volume"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Volume",
+            "min": 0
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 24
+        }
+      },
+      {
+        "id": 7,
+        "title": "👥 Active Users",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "anonymeme:active_users:count5m",
+            "legendFormat": "Active Users"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Count",
+            "min": 0
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 24
+        }
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "timepicker": {},
+    "templating": {
+      "list": [
+        {
+          "name": "environment",
+          "type": "query",
+          "query": "label_values(up, environment)",
+          "refresh": 1,
+          "includeAll": true,
+          "multi": false
+        },
+        {
+          "name": "service",
+          "type": "query",
+          "query": "label_values(up{environment=\"$environment\"}, service)",
+          "refresh": 1,
+          "includeAll": true,
+          "multi": true
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "name": "Deployments",
+          "datasource": "prometheus",
+          "expr": "changes(deployment_info[5m])",
+          "titleFormat": "Deployment",
+          "textFormat": "New deployment detected"
+        },
+        {
+          "name": "Alerts",
+          "datasource": "prometheus", 
+          "expr": "ALERTS{alertstate=\"firing\"}",
+          "titleFormat": "Alert: {{alertname}}",
+          "textFormat": "{{summary}}"
+        }
+      ]
+    },
+    "refresh": "30s",
+    "schemaVersion": 27,
+    "version": 1,
+    "links": [
+      {
+        "title": "API Dashboard",
+        "url": "/d/api-dashboard"
+      },
+      {
+        "title": "Infrastructure Dashboard", 
+        "url": "/d/infrastructure-dashboard"
+      },
+      {
+        "title": "Business Dashboard",
+        "url": "/d/business-dashboard"
+      },
+      {
+        "title": "Security Dashboard",
+        "url": "/d/security-dashboard"
+      }
+    ]
+  }
+}
