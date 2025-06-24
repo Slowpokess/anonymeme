@@ -5,7 +5,7 @@ Production-ready user management с полной авторизацией
 """
 
 import logging
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, AsyncGenerator
 from uuid import UUID
 from datetime import datetime, timedelta
 
@@ -24,7 +24,8 @@ from ..schemas.requests import (
 )
 from ..schemas.responses import (
     UserProfileResponse, UserStatsResponse, UserTokensResponse,
-    UserTradesResponse, SuccessResponse, AuthTokenResponse
+    UserTradesResponse, SuccessResponse, AuthTokenResponse,
+    TokenResponse, PaginationResponse, TradeResponse
 )
 from ..services.cache import CacheService
 from ..core.exceptions import (
@@ -42,7 +43,7 @@ security = HTTPBearer()
 
 # === DEPENDENCY FUNCTIONS ===
 
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency для получения сессии БД"""
     from ..main import get_db_session
     async for session in get_db_session():
