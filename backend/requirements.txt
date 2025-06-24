@@ -20,10 +20,10 @@ redis==5.0.1
 hiredis==2.2.3
 
 # === SOLANA BLOCKCHAIN ===
-solana==0.36.7
-anchorpy==0.18.0
-solders==0.26.0
-construct==2.10.70
+solana>=0.35.0,<1.0.0
+anchorpy>=0.17.0,<1.0.0
+solders>=0.25.0,<1.0.0
+construct>=2.10.0,<3.0.0
 
 # === AUTHENTICATION & SECURITY ===
 python-jose[cryptography]==3.3.0
@@ -75,6 +75,10 @@ click==8.1.7
 python-dotenv==1.0.0
 rich==13.7.0
 typer==0.9.0
+
+# === SECURITY & GEO ===
+geoip2==4.7.0
+user-agents==2.2.0
 
 # === IMAGE & FILE PROCESSING ===
 pillow==10.1.0

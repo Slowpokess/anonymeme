@@ -22,7 +22,7 @@ from ..schemas.requests import PaginationRequest
 from ..schemas.responses import (
     AnalyticsResponse, TrendingTokensResponse, MarketStatsResponse,
     VolumeAnalyticsResponse, UserLeaderboardResponse, PriceHistoryResponse,
-    TokenPerformanceResponse, PlatformStatsResponse
+    TokenPerformanceResponse, PlatformStatsResponse, TokenResponse
 )
 from ..services.cache import CacheService
 from ..core.exceptions import ValidationException, DatabaseException
