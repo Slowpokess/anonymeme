@@ -27,7 +27,7 @@ construct==2.10.70
 
 # === AUTHENTICATION & SECURITY ===
 python-jose[cryptography]==3.3.0
-cryptography==41.0.8
+cryptography>=45.0.0
 passlib[bcrypt]==1.7.4
 python-multipart==0.0.6
 
@@ -39,7 +39,7 @@ requests==2.31.0
 # === ASYNC & CONCURRENCY ===
 asyncio-mqtt==0.16.1
 celery==5.3.4
-redis==5.0.1
+# redis already defined above (line 19)
 
 # === DATA PROCESSING ===
 pandas==2.1.4
@@ -61,7 +61,7 @@ pytest==7.4.3
 pytest-asyncio==0.21.1
 pytest-mock==3.12.0
 pytest-cov==4.1.0
-httpx==0.25.2  # for testing
+# httpx already defined above (line 35)
 
 # === DEVELOPMENT TOOLS ===
 black==23.11.0
