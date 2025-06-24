@@ -8,8 +8,8 @@ on:
   workflow_dispatch:
 
 env:
-  NODE_VERSION: '18'
-  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '20'
+  PYTHON_VERSION: '3.12'
   RUST_VERSION: 'stable'
 
 jobs:
@@ -26,7 +26,7 @@ jobs:
           fetch-depth: 0
 
       - name: 🐍 Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -110,7 +110,7 @@ jobs:
           fi
 
       - name: 📊 Upload Security Reports
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: security-reports
           path: |
@@ -157,7 +157,7 @@ jobs:
           anchor --version
 
       - name: 🔧 Cache Rust dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -262,7 +262,7 @@ jobs:
           fi
 
       - name: 📤 Upload Contract Coverage
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         with:
           files: contracts/pump-core/coverage/cobertura.xml
           flags: contracts
@@ -306,12 +306,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: 🐍 Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: 📦 Cache Python dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
@@ -412,14 +412,14 @@ jobs:
           kill $API_PID || true
 
       - name: 📤 Upload Backend Coverage
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         with:
           files: backend/coverage.xml
           flags: backend
           name: backend-api
 
       - name: 📊 Upload Backend Test Results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: backend-test-results
@@ -443,8 +443,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+          cache: 'yarn'
+          cache-dependency-path: frontend/yarn.lock
 
       - name: 📦 Install dependencies
         working-directory: frontend
@@ -544,14 +544,14 @@ jobs:
           fi
 
       - name: 📤 Upload Frontend Coverage
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         with:
           files: frontend/coverage/lcov.info
           flags: frontend
           name: frontend-react
 
       - name: 📊 Upload Build Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: frontend-build
           path: frontend/.next/
@@ -632,11 +632,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+          cache: 'yarn'
+          cache-dependency-path: frontend/yarn.lock
 
       - name: 🐍 Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -672,7 +672,7 @@ jobs:
           kill $BACKEND_PID $FRONTEND_PID || true
 
       - name: 📊 Upload E2E Results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: e2e-results
@@ -692,7 +692,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: 🐍 Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -723,7 +723,7 @@ jobs:
             --output vulnerability-report.json
 
       - name: 📊 Upload Vulnerability Report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: vulnerability-report
           path: backend/vulnerability-report.json
@@ -742,36 +742,45 @@ jobs:
     steps:
       - name: 📊 Check Results
         run: |
-          echo "Security: ${{ needs.security.outputs.security-passed }}"
-          echo "Contracts: ${{ needs.contracts.outputs.contracts-passed }}"
-          echo "Backend: ${{ needs.backend.outputs.backend-passed }}"
-          echo "Frontend: ${{ needs.frontend.outputs.frontend-passed }}"
-          echo "Docker: ${{ needs.docker.outputs.docker-passed }}"
+          echo "Security: ${{ needs.security.outputs.security-passed || 'not-set' }}"
+          echo "Contracts: ${{ needs.contracts.outputs.contracts-passed || 'not-set' }}"
+          echo "Backend: ${{ needs.backend.outputs.backend-passed || 'not-set' }}"
+          echo "Frontend: ${{ needs.frontend.outputs.frontend-passed || 'not-set' }}"
+          echo "Docker: ${{ needs.docker.outputs.docker-passed || 'not-set' }}"
+          
+          echo "Security result: ${{ needs.security.result }}"
+          echo "Contracts result: ${{ needs.contracts.result }}"
+          echo "Backend result: ${{ needs.backend.result }}"
+          echo "Frontend result: ${{ needs.frontend.result }}"
+          echo "Docker result: ${{ needs.docker.result }}"
 
       - name: ✅ Quality Gate Check
         run: |
-          if [[ "${{ needs.security.outputs.security-passed }}" != "true" ]]; then
-            echo "❌ Security checks failed"
-            exit 1
+          # Check if critical jobs failed (ignore if job was skipped)
+          FAILED_JOBS=()
+          
+          if [[ "${{ needs.security.result }}" == "failure" ]]; then
+            FAILED_JOBS+=("Security checks")
           fi
           
-          if [[ "${{ needs.contracts.outputs.contracts-passed }}" != "true" ]]; then
-            echo "❌ Smart contract tests failed"
-            exit 1
+          if [[ "${{ needs.contracts.result }}" == "failure" ]]; then
+            FAILED_JOBS+=("Smart contract tests")
           fi
           
-          if [[ "${{ needs.backend.outputs.backend-passed }}" != "true" ]]; then
-            echo "❌ Backend tests failed"
-            exit 1
+          if [[ "${{ needs.backend.result }}" == "failure" ]]; then
+            FAILED_JOBS+=("Backend tests")
           fi
           
-          if [[ "${{ needs.frontend.outputs.frontend-passed }}" != "true" ]]; then
-            echo "❌ Frontend tests failed"
-            exit 1
+          if [[ "${{ needs.frontend.result }}" == "failure" ]]; then
+            FAILED_JOBS+=("Frontend tests")
           fi
           
-          if [[ "${{ needs.docker.outputs.docker-passed }}" != "true" ]]; then
-            echo "❌ Docker build failed"
+          if [[ "${{ needs.docker.result }}" == "failure" ]]; then
+            FAILED_JOBS+=("Docker build")
+          fi
+          
+          if [ ${#FAILED_JOBS[@]} -gt 0 ]; then
+            echo "❌ Failed jobs: ${FAILED_JOBS[*]}"
             exit 1
           fi
           

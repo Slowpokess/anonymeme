@@ -133,7 +133,7 @@ jobs:
 
       - name: 🏗️ Build and Push Backend
         id: build-backend
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./backend
           platforms: linux/amd64,linux/arm64
@@ -147,7 +147,7 @@ jobs:
 
       - name: 🏗️ Build and Push Frontend
         id: build-frontend
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./frontend
           platforms: linux/amd64,linux/arm64
@@ -178,7 +178,7 @@ jobs:
           trivy image ${{ steps.meta-frontend.outputs.tags }} --exit-code 1 --severity HIGH,CRITICAL
 
       - name: 📊 Upload Scan Results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: security-scans
           path: |
