@@ -16,8 +16,8 @@ pub mod pump_core {
 
     /// 🎯 Инициализация платформы с администратором и конфигурацией
     pub fn initialize_platform(
-        ctx: Context<InitializePlatform>, 
-        fee_rate: f64,
+        ctx: Context<InitializePlatform>,
+        fee_rate: u16, // В базисных пунктах (10000 = 100%)
         treasury: Pubkey,
         security_params: SecurityParams,
     ) -> Result<()> {
@@ -27,17 +27,14 @@ pub mod pump_core {
     /// 🏭 Создание нового токена с бондинг-кривой
     pub fn create_token(
         ctx: Context<CreateToken>,
-        name: String,
-        symbol: String,
-        uri: String,
-        bonding_curve_params: crate::state::BondingCurveParams,
+        params: crate::instructions::create_token::CreateTokenParams,
     ) -> Result<()> {
-        instructions::create_token(ctx, name, symbol, uri, bonding_curve_params)
+        instructions::create_token(ctx, params)
     }
 
     /// 💰 Покупка токенов за SOL (следует бондинг-кривой)
     pub fn buy_tokens(
-        ctx: Context<TradeTokens>,
+        ctx: Context<BuyTokens>,
         sol_amount: u64,
         min_tokens_out: u64,
         slippage_tolerance: u16, // В базисных пунктах (100 = 1%)
@@ -47,7 +44,7 @@ pub mod pump_core {
 
     /// 💸 Продажа токенов за SOL (следует бондинг-кривой)
     pub fn sell_tokens(
-        ctx: Context<TradeTokens>,
+        ctx: Context<SellTokens>,
         token_amount: u64,
         min_sol_out: u64,
         slippage_tolerance: u16,
@@ -59,9 +56,9 @@ pub mod pump_core {
     pub fn graduate_to_dex(
         ctx: Context<GraduateToDex>,
         dex_type: DexType,
-        initial_liquidity: u64,
+        minimum_liquidity_sol: u64,
     ) -> Result<()> {
-        instructions::graduate_to_dex(ctx, dex_type, initial_liquidity)
+        instructions::graduate_to_dex(ctx, dex_type, minimum_liquidity_sol)
     }
 
     /// 🛡️ Обновление параметров безопасности (только админ)
@@ -73,11 +70,12 @@ pub mod pump_core {
     }
 
     /// ⏸️ Экстренная пауза/возобновление торговли (только админ)
-    pub fn toggle_emergency_pause(
+    pub fn emergency_pause_platform(
         ctx: Context<EmergencyControl>,
         pause: bool,
+        reason: String,
     ) -> Result<()> {
-        instructions::toggle_emergency_pause(ctx, pause)
+        instructions::emergency_pause_platform(ctx, pause, reason)
     }
 
     /// 📈 Получение текущей цены токена из бондинг-кривой
@@ -91,8 +89,9 @@ pub mod pump_core {
     pub fn update_user_reputation(
         ctx: Context<UpdateUserReputation>,
         reputation_delta: i32,
+        reason: String,
     ) -> Result<()> {
-        instructions::update_user_reputation(ctx, reputation_delta)
+        instructions::update_user_reputation(ctx, reputation_delta, reason)
     }
 
     /// 🚨 Сообщение о подозрительной активности (модерация сообщества)
@@ -108,24 +107,27 @@ pub mod pump_core {
     /// 💼 Обновление комиссии платформы (только админ)
     pub fn update_platform_fee(
         ctx: Context<UpdatePlatformConfig>,
-        new_fee_rate: f64,
+        new_fee_rate: u16, // В базисных пунктах (10000 = 100%)
+        reason: String,
     ) -> Result<()> {
-        instructions::update_platform_fee(ctx, new_fee_rate)
+        instructions::update_platform_fee(ctx, new_fee_rate, reason)
     }
 
     /// 🏦 Обновление адреса казны (только админ)
     pub fn update_treasury(
         ctx: Context<UpdatePlatformConfig>,
         new_treasury: Pubkey,
+        reason: String,
     ) -> Result<()> {
-        instructions::update_treasury(ctx, new_treasury)
+        instructions::update_treasury(ctx, new_treasury, reason)
     }
 
     /// 👑 Передача прав администратора (только текущий админ)
     pub fn transfer_admin(
         ctx: Context<TransferAdmin>,
+        reason: String,
     ) -> Result<()> {
-        instructions::transfer_admin(ctx)
+        instructions::transfer_admin(ctx, reason)
     }
 }
 

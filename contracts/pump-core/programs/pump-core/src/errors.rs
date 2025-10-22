@@ -3,7 +3,7 @@
 use anchor_lang::prelude::*;
 
 #[error_code]
-pub enum CustomError {
+pub enum ErrorCode {
     // === ОБЩИЕ ОШИБКИ (6000-6099) ===
     #[msg("Platform is currently paused")]
     PlatformPaused, // 6000
@@ -357,19 +357,19 @@ pub enum CustomError {
     MintAuthorityRequired, // 6915
 }
 
-impl CustomError {
+impl ErrorCode {
     /// Возвращает является ли ошибка критической (требует немедленного внимания)
     pub fn is_critical(&self) -> bool {
         matches!(
             self,
-            CustomError::OverflowOrUnderflowOccurred
-                | CustomError::CircuitBreakerTriggered
-                | CustomError::BotActivityDetected
-                | CustomError::MarketManipulationDetected
-                | CustomError::HoneypotDetected
-                | CustomError::EmergencyMode
-                | CustomError::SecurityScoreTooLow
-                | CustomError::SuspiciousActivity
+            ErrorCode::OverflowOrUnderflowOccurred
+                | ErrorCode::CircuitBreakerTriggered
+                | ErrorCode::BotActivityDetected
+                | ErrorCode::MarketManipulationDetected
+                | ErrorCode::HoneypotDetected
+                | ErrorCode::EmergencyMode
+                | ErrorCode::SecurityScoreTooLow
+                | ErrorCode::SuspiciousActivity
         )
     }
 
@@ -377,16 +377,16 @@ impl CustomError {
     pub fn is_security_related(&self) -> bool {
         matches!(
             self,
-            CustomError::BotActivityDetected
-                | CustomError::MarketManipulationDetected
-                | CustomError::HoneypotDetected
-                | CustomError::SuspiciousActivity
-                | CustomError::AccountLocked
-                | CustomError::UserBanned
-                | CustomError::TokenFlagged
-                | CustomError::SecurityScoreTooLow
-                | CustomError::WhaleProtectionTriggered
-                | CustomError::SpamProtection
+            ErrorCode::BotActivityDetected
+                | ErrorCode::MarketManipulationDetected
+                | ErrorCode::HoneypotDetected
+                | ErrorCode::SuspiciousActivity
+                | ErrorCode::AccountLocked
+                | ErrorCode::UserBanned
+                | ErrorCode::TokenFlagged
+                | ErrorCode::SecurityScoreTooLow
+                | ErrorCode::WhaleProtectionTriggered
+                | ErrorCode::SpamProtection
         )
     }
 
@@ -416,10 +416,10 @@ impl CustomError {
             ErrorPriority::High
         } else {
             match self {
-                CustomError::NetworkCongestion
-                | CustomError::RpcTimeout
-                | CustomError::TradingTooFast
-                | CustomError::SlippageExceeded => ErrorPriority::Medium,
+                ErrorCode::NetworkCongestion
+                | ErrorCode::RpcTimeout
+                | ErrorCode::TradingTooFast
+                | ErrorCode::SlippageExceeded => ErrorPriority::Medium,
                 _ => ErrorPriority::Low,
             }
         }
@@ -428,16 +428,16 @@ impl CustomError {
     /// Возвращает рекомендуемое действие для пользователя
     pub fn get_user_action(&self) -> &'static str {
         match self {
-            CustomError::SlippageExceeded => "Increase slippage tolerance or try again later",
-            CustomError::TradingTooFast => "Wait a moment before next trade",
-            CustomError::NetworkCongestion => "Network is busy, please try again in a few minutes",
-            CustomError::InsufficientBalance => "Add more funds to your wallet",
-            CustomError::SpamProtection => "Wait 5 minutes before creating another token",
-            CustomError::TradeSizeExceeded => "Reduce trade size or split into smaller trades",
-            CustomError::MinHoldTimeNotMet => "Wait before selling (minimum hold time required)",
-            CustomError::TokenAlreadyGraduated => "Trade this token on the DEX instead",
-            CustomError::KYCRequired => "Complete KYC verification to continue",
-            CustomError::UserBanned => "Contact support - your account is banned",
+            ErrorCode::SlippageExceeded => "Increase slippage tolerance or try again later",
+            ErrorCode::TradingTooFast => "Wait a moment before next trade",
+            ErrorCode::NetworkCongestion => "Network is busy, please try again in a few minutes",
+            ErrorCode::InsufficientBalance => "Add more funds to your wallet",
+            ErrorCode::SpamProtection => "Wait 5 minutes before creating another token",
+            ErrorCode::TradeSizeExceeded => "Reduce trade size or split into smaller trades",
+            ErrorCode::MinHoldTimeNotMet => "Wait before selling (minimum hold time required)",
+            ErrorCode::TokenAlreadyGraduated => "Trade this token on the DEX instead",
+            ErrorCode::KYCRequired => "Complete KYC verification to continue",
+            ErrorCode::UserBanned => "Contact support - your account is banned",
             _ => "Check transaction details and try again",
         }
     }
@@ -446,10 +446,10 @@ impl CustomError {
     pub fn should_log(&self) -> bool {
         !matches!(
             self,
-            CustomError::SlippageExceeded
-                | CustomError::TradingTooFast
-                | CustomError::InvalidAmount
-                | CustomError::InsufficientBalance
+            ErrorCode::SlippageExceeded
+                | ErrorCode::TradingTooFast
+                | ErrorCode::InvalidAmount
+                | ErrorCode::InsufficientBalance
         )
     }
 
@@ -457,10 +457,10 @@ impl CustomError {
     pub fn should_notify_admin(&self) -> bool {
         self.is_critical() || matches!(
             self,
-            CustomError::BotActivityDetected
-                | CustomError::MarketManipulationDetected
-                | CustomError::SuspiciousActivity
-                | CustomError::DexListingFailed
+            ErrorCode::BotActivityDetected
+                | ErrorCode::MarketManipulationDetected
+                | ErrorCode::SuspiciousActivity
+                | ErrorCode::DexListingFailed
         )
     }
 }
@@ -545,61 +545,61 @@ mod tests {
     #[test]
     fn test_error_categorization() {
         // Тест общих ошибок (6000-6099)
-        assert!(matches!(CustomError::PlatformPaused.get_category(), ErrorCategory::General));
-        assert!(matches!(CustomError::InvalidAmount.get_category(), ErrorCategory::General));
-        assert!(matches!(CustomError::Unauthorized.get_category(), ErrorCategory::General));
+        assert!(matches!(ErrorCode::PlatformPaused.get_category(), ErrorCategory::General));
+        assert!(matches!(ErrorCode::InvalidAmount.get_category(), ErrorCategory::General));
+        assert!(matches!(ErrorCode::Unauthorized.get_category(), ErrorCategory::General));
 
         // Тест ошибок создания токенов (6100-6199)
-        assert!(matches!(CustomError::NameTooLong.get_category(), ErrorCategory::TokenCreation));
-        assert!(matches!(CustomError::SymbolTooLong.get_category(), ErrorCategory::TokenCreation));
-        assert!(matches!(CustomError::InvalidBondingCurveParams.get_category(), ErrorCategory::TokenCreation));
+        assert!(matches!(ErrorCode::NameTooLong.get_category(), ErrorCategory::TokenCreation));
+        assert!(matches!(ErrorCode::SymbolTooLong.get_category(), ErrorCategory::TokenCreation));
+        assert!(matches!(ErrorCode::InvalidBondingCurveParams.get_category(), ErrorCategory::TokenCreation));
 
         // Тест торговых ошибок (6200-6299)
-        assert!(matches!(CustomError::SlippageExceeded.get_category(), ErrorCategory::Trading));
-        assert!(matches!(CustomError::TradeSizeExceeded.get_category(), ErrorCategory::Trading));
-        assert!(matches!(CustomError::TokenAlreadyGraduated.get_category(), ErrorCategory::Trading));
+        assert!(matches!(ErrorCode::SlippageExceeded.get_category(), ErrorCategory::Trading));
+        assert!(matches!(ErrorCode::TradeSizeExceeded.get_category(), ErrorCategory::Trading));
+        assert!(matches!(ErrorCode::TokenAlreadyGraduated.get_category(), ErrorCategory::Trading));
 
         // Тест ошибок листинга на DEX (6300-6399)
-        assert!(matches!(CustomError::NotEligibleForGraduation.get_category(), ErrorCategory::DexListing));
-        assert!(matches!(CustomError::AlreadyGraduated.get_category(), ErrorCategory::DexListing));
+        assert!(matches!(ErrorCode::NotEligibleForGraduation.get_category(), ErrorCategory::DexListing));
+        assert!(matches!(ErrorCode::AlreadyGraduated.get_category(), ErrorCategory::DexListing));
 
         // Тест ошибок безопасности (6400-6499)
-        assert!(matches!(CustomError::AdminOnly.get_category(), ErrorCategory::Security));
-        assert!(matches!(CustomError::UserBanned.get_category(), ErrorCategory::Security));
-        assert!(matches!(CustomError::EmergencyMode.get_category(), ErrorCategory::Security));
+        assert!(matches!(ErrorCode::AdminOnly.get_category(), ErrorCategory::Security));
+        assert!(matches!(ErrorCode::UserBanned.get_category(), ErrorCategory::Security));
+        assert!(matches!(ErrorCode::EmergencyMode.get_category(), ErrorCategory::Security));
 
         // Тест ошибок профилей (6500-6599)
-        assert!(matches!(CustomError::UserProfileNotFound.get_category(), ErrorCategory::UserProfile));
-        assert!(matches!(CustomError::InvalidReputationScore.get_category(), ErrorCategory::UserProfile));
+        assert!(matches!(ErrorCode::UserProfileNotFound.get_category(), ErrorCategory::UserProfile));
+        assert!(matches!(ErrorCode::InvalidReputationScore.get_category(), ErrorCategory::UserProfile));
 
         // Тест математических ошибок (6600-6699)
-        assert!(matches!(CustomError::DivisionByZero.get_category(), ErrorCategory::Mathematical));
-        assert!(matches!(CustomError::MathematicalOverflow.get_category(), ErrorCategory::Mathematical));
+        assert!(matches!(ErrorCode::DivisionByZero.get_category(), ErrorCategory::Mathematical));
+        assert!(matches!(ErrorCode::MathematicalOverflow.get_category(), ErrorCategory::Mathematical));
 
         // Тест временных ошибок (6700-6799)
-        assert!(matches!(CustomError::InvalidTimestamp.get_category(), ErrorCategory::Temporal));
-        assert!(matches!(CustomError::CooldownNotElapsed.get_category(), ErrorCategory::Temporal));
+        assert!(matches!(ErrorCode::InvalidTimestamp.get_category(), ErrorCategory::Temporal));
+        assert!(matches!(ErrorCode::CooldownNotElapsed.get_category(), ErrorCategory::Temporal));
 
         // Тест сетевых ошибок (6800-6899)
-        assert!(matches!(CustomError::NetworkCongestion.get_category(), ErrorCategory::Network));
-        assert!(matches!(CustomError::RpcTimeout.get_category(), ErrorCategory::Network));
+        assert!(matches!(ErrorCode::NetworkCongestion.get_category(), ErrorCategory::Network));
+        assert!(matches!(ErrorCode::RpcTimeout.get_category(), ErrorCategory::Network));
 
         // Тест бизнес-логики (6900-6999)
-        assert!(matches!(CustomError::LaunchWindowClosed.get_category(), ErrorCategory::BusinessLogic));
-        assert!(matches!(CustomError::PresaleEnded.get_category(), ErrorCategory::BusinessLogic));
+        assert!(matches!(ErrorCode::LaunchWindowClosed.get_category(), ErrorCategory::BusinessLogic));
+        assert!(matches!(ErrorCode::PresaleEnded.get_category(), ErrorCategory::BusinessLogic));
     }
 
     #[test]
     fn test_critical_errors_identification() {
         let critical_errors = vec![
-            CustomError::OverflowOrUnderflowOccurred,
-            CustomError::CircuitBreakerTriggered,
-            CustomError::BotActivityDetected,
-            CustomError::MarketManipulationDetected,
-            CustomError::HoneypotDetected,
-            CustomError::EmergencyMode,
-            CustomError::SecurityScoreTooLow,
-            CustomError::SuspiciousActivity,
+            ErrorCode::OverflowOrUnderflowOccurred,
+            ErrorCode::CircuitBreakerTriggered,
+            ErrorCode::BotActivityDetected,
+            ErrorCode::MarketManipulationDetected,
+            ErrorCode::HoneypotDetected,
+            ErrorCode::EmergencyMode,
+            ErrorCode::SecurityScoreTooLow,
+            ErrorCode::SuspiciousActivity,
         ];
 
         for error in critical_errors {
@@ -608,10 +608,10 @@ mod tests {
 
         // Тест не критических ошибок
         let non_critical_errors = vec![
-            CustomError::SlippageExceeded,
-            CustomError::InvalidAmount,
-            CustomError::NameTooLong,
-            CustomError::TradingTooFast,
+            ErrorCode::SlippageExceeded,
+            ErrorCode::InvalidAmount,
+            ErrorCode::NameTooLong,
+            ErrorCode::TradingTooFast,
         ];
 
         for error in non_critical_errors {
@@ -622,16 +622,16 @@ mod tests {
     #[test]
     fn test_security_related_errors() {
         let security_errors = vec![
-            CustomError::BotActivityDetected,
-            CustomError::MarketManipulationDetected,
-            CustomError::HoneypotDetected,
-            CustomError::SuspiciousActivity,
-            CustomError::AccountLocked,
-            CustomError::UserBanned,
-            CustomError::TokenFlagged,
-            CustomError::SecurityScoreTooLow,
-            CustomError::WhaleProtectionTriggered,
-            CustomError::SpamProtection,
+            ErrorCode::BotActivityDetected,
+            ErrorCode::MarketManipulationDetected,
+            ErrorCode::HoneypotDetected,
+            ErrorCode::SuspiciousActivity,
+            ErrorCode::AccountLocked,
+            ErrorCode::UserBanned,
+            ErrorCode::TokenFlagged,
+            ErrorCode::SecurityScoreTooLow,
+            ErrorCode::WhaleProtectionTriggered,
+            ErrorCode::SpamProtection,
         ];
 
         for error in security_errors {
@@ -640,10 +640,10 @@ mod tests {
 
         // Тест не связанных с безопасностью ошибок
         let non_security_errors = vec![
-            CustomError::SlippageExceeded,
-            CustomError::NameTooLong,
-            CustomError::InvalidAmount,
-            CustomError::NetworkCongestion,
+            ErrorCode::SlippageExceeded,
+            ErrorCode::NameTooLong,
+            ErrorCode::InvalidAmount,
+            ErrorCode::NetworkCongestion,
         ];
 
         for error in non_security_errors {
@@ -654,73 +654,73 @@ mod tests {
     #[test]
     fn test_error_priorities() {
         // Критические ошибки
-        assert_eq!(CustomError::EmergencyMode.get_priority(), ErrorPriority::Critical);
-        assert_eq!(CustomError::CircuitBreakerTriggered.get_priority(), ErrorPriority::Critical);
-        assert_eq!(CustomError::OverflowOrUnderflowOccurred.get_priority(), ErrorPriority::Critical);
+        assert_eq!(ErrorCode::EmergencyMode.get_priority(), ErrorPriority::Critical);
+        assert_eq!(ErrorCode::CircuitBreakerTriggered.get_priority(), ErrorPriority::Critical);
+        assert_eq!(ErrorCode::OverflowOrUnderflowOccurred.get_priority(), ErrorPriority::Critical);
 
         // Высокоприоритетные ошибки (безопасность)
-        assert_eq!(CustomError::BotActivityDetected.get_priority(), ErrorPriority::High);
-        assert_eq!(CustomError::MarketManipulationDetected.get_priority(), ErrorPriority::High);
-        assert_eq!(CustomError::UserBanned.get_priority(), ErrorPriority::High);
+        assert_eq!(ErrorCode::BotActivityDetected.get_priority(), ErrorPriority::High);
+        assert_eq!(ErrorCode::MarketManipulationDetected.get_priority(), ErrorPriority::High);
+        assert_eq!(ErrorCode::UserBanned.get_priority(), ErrorPriority::High);
 
         // Среднеприоритетные ошибки
-        assert_eq!(CustomError::NetworkCongestion.get_priority(), ErrorPriority::Medium);
-        assert_eq!(CustomError::RpcTimeout.get_priority(), ErrorPriority::Medium);
-        assert_eq!(CustomError::TradingTooFast.get_priority(), ErrorPriority::Medium);
-        assert_eq!(CustomError::SlippageExceeded.get_priority(), ErrorPriority::Medium);
+        assert_eq!(ErrorCode::NetworkCongestion.get_priority(), ErrorPriority::Medium);
+        assert_eq!(ErrorCode::RpcTimeout.get_priority(), ErrorPriority::Medium);
+        assert_eq!(ErrorCode::TradingTooFast.get_priority(), ErrorPriority::Medium);
+        assert_eq!(ErrorCode::SlippageExceeded.get_priority(), ErrorPriority::Medium);
 
         // Низкоприоритетные ошибки
-        assert_eq!(CustomError::NameTooLong.get_priority(), ErrorPriority::Low);
-        assert_eq!(CustomError::InvalidAmount.get_priority(), ErrorPriority::Low);
-        assert_eq!(CustomError::EventTooOld.get_priority(), ErrorPriority::Low);
+        assert_eq!(ErrorCode::NameTooLong.get_priority(), ErrorPriority::Low);
+        assert_eq!(ErrorCode::InvalidAmount.get_priority(), ErrorPriority::Low);
+        assert_eq!(ErrorCode::EventTooOld.get_priority(), ErrorPriority::Low);
     }
 
     #[test]
     fn test_user_action_recommendations() {
         assert_eq!(
-            CustomError::SlippageExceeded.get_user_action(),
+            ErrorCode::SlippageExceeded.get_user_action(),
             "Increase slippage tolerance or try again later"
         );
         assert_eq!(
-            CustomError::TradingTooFast.get_user_action(),
+            ErrorCode::TradingTooFast.get_user_action(),
             "Wait a moment before next trade"
         );
         assert_eq!(
-            CustomError::NetworkCongestion.get_user_action(),
+            ErrorCode::NetworkCongestion.get_user_action(),
             "Network is busy, please try again in a few minutes"
         );
         assert_eq!(
-            CustomError::InsufficientBalance.get_user_action(),
+            ErrorCode::InsufficientBalance.get_user_action(),
             "Add more funds to your wallet"
         );
         assert_eq!(
-            CustomError::SpamProtection.get_user_action(),
+            ErrorCode::SpamProtection.get_user_action(),
             "Wait 5 minutes before creating another token"
         );
         assert_eq!(
-            CustomError::TradeSizeExceeded.get_user_action(),
+            ErrorCode::TradeSizeExceeded.get_user_action(),
             "Reduce trade size or split into smaller trades"
         );
         assert_eq!(
-            CustomError::MinHoldTimeNotMet.get_user_action(),
+            ErrorCode::MinHoldTimeNotMet.get_user_action(),
             "Wait before selling (minimum hold time required)"
         );
         assert_eq!(
-            CustomError::TokenAlreadyGraduated.get_user_action(),
+            ErrorCode::TokenAlreadyGraduated.get_user_action(),
             "Trade this token on the DEX instead"
         );
         assert_eq!(
-            CustomError::KYCRequired.get_user_action(),
+            ErrorCode::KYCRequired.get_user_action(),
             "Complete KYC verification to continue"
         );
         assert_eq!(
-            CustomError::UserBanned.get_user_action(),
+            ErrorCode::UserBanned.get_user_action(),
             "Contact support - your account is banned"
         );
 
         // Тест дефолтного действия
         assert_eq!(
-            CustomError::DivisionByZero.get_user_action(),
+            ErrorCode::DivisionByZero.get_user_action(),
             "Check transaction details and try again"
         );
     }
@@ -729,10 +729,10 @@ mod tests {
     fn test_logging_requirements() {
         // Ошибки, которые не должны логироваться
         let no_log_errors = vec![
-            CustomError::SlippageExceeded,
-            CustomError::TradingTooFast,
-            CustomError::InvalidAmount,
-            CustomError::InsufficientBalance,
+            ErrorCode::SlippageExceeded,
+            ErrorCode::TradingTooFast,
+            ErrorCode::InvalidAmount,
+            ErrorCode::InsufficientBalance,
         ];
 
         for error in no_log_errors {
@@ -741,11 +741,11 @@ mod tests {
 
         // Ошибки, которые должны логироваться
         let should_log_errors = vec![
-            CustomError::BotActivityDetected,
-            CustomError::MarketManipulationDetected,
-            CustomError::EmergencyMode,
-            CustomError::DexListingFailed,
-            CustomError::UserBanned,
+            ErrorCode::BotActivityDetected,
+            ErrorCode::MarketManipulationDetected,
+            ErrorCode::EmergencyMode,
+            ErrorCode::DexListingFailed,
+            ErrorCode::UserBanned,
         ];
 
         for error in should_log_errors {
@@ -757,13 +757,13 @@ mod tests {
     fn test_admin_notification_requirements() {
         // Ошибки, требующие уведомления админа
         let notify_admin_errors = vec![
-            CustomError::EmergencyMode,
-            CustomError::CircuitBreakerTriggered,
-            CustomError::BotActivityDetected,
-            CustomError::MarketManipulationDetected,
-            CustomError::HoneypotDetected,
-            CustomError::SuspiciousActivity,
-            CustomError::DexListingFailed,
+            ErrorCode::EmergencyMode,
+            ErrorCode::CircuitBreakerTriggered,
+            ErrorCode::BotActivityDetected,
+            ErrorCode::MarketManipulationDetected,
+            ErrorCode::HoneypotDetected,
+            ErrorCode::SuspiciousActivity,
+            ErrorCode::DexListingFailed,
         ];
 
         for error in notify_admin_errors {
@@ -772,11 +772,11 @@ mod tests {
 
         // Ошибки, не требующие уведомления админа
         let no_notify_errors = vec![
-            CustomError::SlippageExceeded,
-            CustomError::TradingTooFast,
-            CustomError::InvalidAmount,
-            CustomError::NameTooLong,
-            CustomError::NetworkCongestion,
+            ErrorCode::SlippageExceeded,
+            ErrorCode::TradingTooFast,
+            ErrorCode::InvalidAmount,
+            ErrorCode::NameTooLong,
+            ErrorCode::NetworkCongestion,
         ];
 
         for error in no_notify_errors {
@@ -830,35 +830,35 @@ mod tests {
     #[test]
     fn test_error_code_ranges() {
         // Проверка, что ошибки попадают в правильные диапазоны кодов
-        assert!((CustomError::PlatformPaused as u32) >= 6000);
-        assert!((CustomError::PlatformPaused as u32) < 6100);
+        assert!((ErrorCode::PlatformPaused as u32) >= 6000);
+        assert!((ErrorCode::PlatformPaused as u32) < 6100);
         
-        assert!((CustomError::NameTooLong as u32) >= 6100);
-        assert!((CustomError::NameTooLong as u32) < 6200);
+        assert!((ErrorCode::NameTooLong as u32) >= 6100);
+        assert!((ErrorCode::NameTooLong as u32) < 6200);
         
-        assert!((CustomError::TradeSizeExceeded as u32) >= 6200);
-        assert!((CustomError::TradeSizeExceeded as u32) < 6300);
+        assert!((ErrorCode::TradeSizeExceeded as u32) >= 6200);
+        assert!((ErrorCode::TradeSizeExceeded as u32) < 6300);
         
-        assert!((CustomError::NotEligibleForGraduation as u32) >= 6300);
-        assert!((CustomError::NotEligibleForGraduation as u32) < 6400);
+        assert!((ErrorCode::NotEligibleForGraduation as u32) >= 6300);
+        assert!((ErrorCode::NotEligibleForGraduation as u32) < 6400);
         
-        assert!((CustomError::AdminOnly as u32) >= 6400);
-        assert!((CustomError::AdminOnly as u32) < 6500);
+        assert!((ErrorCode::AdminOnly as u32) >= 6400);
+        assert!((ErrorCode::AdminOnly as u32) < 6500);
         
-        assert!((CustomError::UserProfileNotFound as u32) >= 6500);
-        assert!((CustomError::UserProfileNotFound as u32) < 6600);
+        assert!((ErrorCode::UserProfileNotFound as u32) >= 6500);
+        assert!((ErrorCode::UserProfileNotFound as u32) < 6600);
         
-        assert!((CustomError::DivisionByZero as u32) >= 6600);
-        assert!((CustomError::DivisionByZero as u32) < 6700);
+        assert!((ErrorCode::DivisionByZero as u32) >= 6600);
+        assert!((ErrorCode::DivisionByZero as u32) < 6700);
         
-        assert!((CustomError::InvalidTimestamp as u32) >= 6700);
-        assert!((CustomError::InvalidTimestamp as u32) < 6800);
+        assert!((ErrorCode::InvalidTimestamp as u32) >= 6700);
+        assert!((ErrorCode::InvalidTimestamp as u32) < 6800);
         
-        assert!((CustomError::NetworkCongestion as u32) >= 6800);
-        assert!((CustomError::NetworkCongestion as u32) < 6900);
+        assert!((ErrorCode::NetworkCongestion as u32) >= 6800);
+        assert!((ErrorCode::NetworkCongestion as u32) < 6900);
         
-        assert!((CustomError::LaunchWindowClosed as u32) >= 6900);
-        assert!((CustomError::LaunchWindowClosed as u32) < 7000);
+        assert!((ErrorCode::LaunchWindowClosed as u32) >= 6900);
+        assert!((ErrorCode::LaunchWindowClosed as u32) < 7000);
     }
 
     #[test]
@@ -868,43 +868,43 @@ mod tests {
         
         let all_errors = vec![
             // Общие ошибки
-            CustomError::PlatformPaused,
-            CustomError::InvalidAmount,
-            CustomError::InsufficientBalance,
-            CustomError::Unauthorized,
+            ErrorCode::PlatformPaused,
+            ErrorCode::InvalidAmount,
+            ErrorCode::InsufficientBalance,
+            ErrorCode::Unauthorized,
             
             // Ошибки создания токенов
-            CustomError::NameTooLong,
-            CustomError::SymbolTooLong,
-            CustomError::InvalidBondingCurveParams,
-            CustomError::SpamProtection,
+            ErrorCode::NameTooLong,
+            ErrorCode::SymbolTooLong,
+            ErrorCode::InvalidBondingCurveParams,
+            ErrorCode::SpamProtection,
             
             // Торговые ошибки
-            CustomError::TradeSizeExceeded,
-            CustomError::SlippageExceeded,
-            CustomError::TradingTooFast,
-            CustomError::TokenAlreadyGraduated,
+            ErrorCode::TradeSizeExceeded,
+            ErrorCode::SlippageExceeded,
+            ErrorCode::TradingTooFast,
+            ErrorCode::TokenAlreadyGraduated,
             
             // Ошибки безопасности
-            CustomError::BotActivityDetected,
-            CustomError::MarketManipulationDetected,
-            CustomError::UserBanned,
-            CustomError::EmergencyMode,
+            ErrorCode::BotActivityDetected,
+            ErrorCode::MarketManipulationDetected,
+            ErrorCode::UserBanned,
+            ErrorCode::EmergencyMode,
             
             // Математические ошибки
-            CustomError::DivisionByZero,
-            CustomError::MathematicalOverflow,
-            CustomError::SqrtNegativeNumber,
+            ErrorCode::DivisionByZero,
+            ErrorCode::MathematicalOverflow,
+            ErrorCode::SqrtNegativeNumber,
             
             // Временные ошибки
-            CustomError::InvalidTimestamp,
-            CustomError::CooldownNotElapsed,
-            CustomError::DeadlineExceeded,
+            ErrorCode::InvalidTimestamp,
+            ErrorCode::CooldownNotElapsed,
+            ErrorCode::DeadlineExceeded,
             
             // Сетевые ошибки
-            CustomError::NetworkCongestion,
-            CustomError::RpcTimeout,
-            CustomError::CpiFailure,
+            ErrorCode::NetworkCongestion,
+            ErrorCode::RpcTimeout,
+            ErrorCode::CpiFailure,
         ];
 
         for error in all_errors {
@@ -918,14 +918,14 @@ mod tests {
     fn test_error_consistency() {
         // Тест что критические ошибки также являются ошибками безопасности или требуют уведомления админа
         let critical_errors = vec![
-            CustomError::OverflowOrUnderflowOccurred,
-            CustomError::CircuitBreakerTriggered,
-            CustomError::BotActivityDetected,
-            CustomError::MarketManipulationDetected,
-            CustomError::HoneypotDetected,
-            CustomError::EmergencyMode,
-            CustomError::SecurityScoreTooLow,
-            CustomError::SuspiciousActivity,
+            ErrorCode::OverflowOrUnderflowOccurred,
+            ErrorCode::CircuitBreakerTriggered,
+            ErrorCode::BotActivityDetected,
+            ErrorCode::MarketManipulationDetected,
+            ErrorCode::HoneypotDetected,
+            ErrorCode::EmergencyMode,
+            ErrorCode::SecurityScoreTooLow,
+            ErrorCode::SuspiciousActivity,
         ];
 
         for error in critical_errors {
@@ -942,18 +942,18 @@ mod tests {
     #[test]
     fn test_macro_helpers() {
         // Тест макросов (они должны компилироваться)
-        fn test_require_macros() -> Result<(), CustomError> {
+        fn test_require_macros() -> Result<(), ErrorCode> {
             let value = 5u64;
             let limit = 10u64;
             
-            require_gte!(value, 1, CustomError::InvalidAmount);
-            require_lte!(value, limit, CustomError::TradeSizeExceeded);
-            require_gt!(value, 0, CustomError::InvalidAmount);
-            require_lt!(value, 100, CustomError::TradeSizeExceeded);
-            require_not_zero!(value, CustomError::DivisionByZero);
+            require_gte!(value, 1, ErrorCode::InvalidAmount);
+            require_lte!(value, limit, ErrorCode::TradeSizeExceeded);
+            require_gt!(value, 0, ErrorCode::InvalidAmount);
+            require_lt!(value, 100, ErrorCode::TradeSizeExceeded);
+            require_not_zero!(value, ErrorCode::DivisionByZero);
             
             let text = "valid text";
-            require_non_empty!(text, CustomError::NameTooLong);
+            require_non_empty!(text, ErrorCode::NameTooLong);
             
             Ok(())
         }
@@ -962,16 +962,16 @@ mod tests {
         assert!(test_require_macros().is_ok());
         
         // Тест что макросы правильно возвращают ошибки
-        fn test_require_failure() -> Result<(), CustomError> {
+        fn test_require_failure() -> Result<(), ErrorCode> {
             let value = 0u64;
-            require_not_zero!(value, CustomError::DivisionByZero);
+            require_not_zero!(value, ErrorCode::DivisionByZero);
             Ok(())
         }
         
         let result = test_require_failure();
         assert!(result.is_err());
         if let Err(err) = result {
-            assert_eq!(err, CustomError::DivisionByZero);
+            assert_eq!(err, ErrorCode::DivisionByZero);
         }
     }
 
@@ -1020,14 +1020,14 @@ mod tests {
     #[test]
     fn test_error_combinations() {
         // Тест комбинаций свойств ошибок
-        let error = CustomError::BotActivityDetected;
+        let error = ErrorCode::BotActivityDetected;
         assert!(error.is_critical());
         assert!(error.is_security_related());
         assert!(error.should_notify_admin());
         assert!(error.should_log());
         assert_eq!(error.get_priority(), ErrorPriority::Critical);
         
-        let error2 = CustomError::SlippageExceeded;
+        let error2 = ErrorCode::SlippageExceeded;
         assert!(!error2.is_critical());
         assert!(!error2.is_security_related());
         assert!(!error2.should_notify_admin());
