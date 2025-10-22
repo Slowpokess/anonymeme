@@ -117,10 +117,10 @@ export default function AnalyticsPage() {
         const overview: MarketOverview = {
           total_tokens: response.data.total_tokens,
           active_tokens: response.data.total_tokens, // Предполагаем что все активные
-          total_market_cap: parseFloat(response.data.total_market_cap || '0'),
+          total_market_cap: 0, // API не возвращает это поле, можно вычислить позже
           total_volume_24h: parseFloat(response.data.total_volume_24h || '0'),
           total_trades_24h: response.data.total_trades_24h,
-          average_price_change_24h: response.data.average_price_change_24h || 0
+          average_price_change_24h: 0 // API не возвращает это поле, можно вычислить позже
         }
         setMarketOverview(overview)
       }
