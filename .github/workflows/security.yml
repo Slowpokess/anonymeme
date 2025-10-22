@@ -147,7 +147,7 @@ jobs:
 
       - name: 📦 Install Security Tools
         run: |
-          pip install bandit semgrep
+          pip install pbr bandit semgrep
           npm install -g @microsoft/eslint-plugin-sdl
 
       - name: 🔍 Bandit Python Security Scan
