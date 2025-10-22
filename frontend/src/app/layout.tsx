@@ -4,11 +4,11 @@
  */
 
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
 import './globals.css'
 import { Providers } from './providers'
 
-const inter = Inter({ subsets: ['latin', 'cyrillic'] })
+// Using system fonts instead of Google Fonts for faster loading
+// Font family configured in tailwind.config.js and globals.css
 
 export const metadata: Metadata = {
   title: 'Anonymeme - Anonymous Memecoin Trading',
@@ -69,7 +69,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.className} antialiased`}>
+      <body className="font-sans antialiased">
         <Providers>
           <div id="__next">
             {children}
