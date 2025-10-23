@@ -687,6 +687,198 @@ impl BondingCurveMath for ConstantProductCurve {
     }
 }
 
+// === LOGARITHMIC КРИВАЯ ===
+
+/// Logarithmic кривая: price = base_price + scale * ln(supply + 1)
+///
+/// Характеристики:
+/// - Быстрый рост в начале (хорошо вознаграждает ранних)
+/// - Постепенное замедление роста (убывающая отдача)
+/// - Никогда не достигает асимптоты, но растет все медленнее
+/// - Идеально для токенов где нужен баланс между ранними и поздними инвесторами
+#[derive(Debug, Clone)]
+pub struct LogarithmicCurve {
+    pub base_price: u64,    // Базовая цена (минимум)
+    pub scale: u64,         // Масштаб логарифма (в единицах PRECISION)
+    pub max_supply: u64,    // Максимальный supply
+}
+
+impl LogarithmicCurve {
+    pub fn new(base_price: u64, scale: u64, max_supply: u64) -> Result<Self> {
+        require!(base_price >= MIN_PRICE, ErrorCode::InvalidBondingCurveParams);
+        require!(scale > 0, ErrorCode::InvalidBondingCurveParams);
+        require!(max_supply > 0, ErrorCode::InvalidBondingCurveParams);
+
+        Ok(Self {
+            base_price,
+            scale,
+            max_supply,
+        })
+    }
+
+    /// Вычисляет натуральный логарифм ln(x) используя аппроксимацию
+    /// Использует ряд Тейлора: ln(1+x) ≈ x - x²/2 + x³/3 - x⁴/4 + ...
+    fn ln_approximation(&self, x: u64) -> Result<u64> {
+        if x == 0 {
+            return Ok(0); // ln(1) = 0
+        }
+
+        // Для больших x используем свойство ln(a*b) = ln(a) + ln(b)
+        // Разбиваем x на степени 2 для упрощения вычислений
+        let mut result = 0i128;
+        let mut value = (x + 1) as u128; // ln(x+1)
+
+        // Приводим к диапазону [1, 2) используя степени двойки
+        let mut power_of_two = 0;
+        while value >= (2 * PRECISION as u128) {
+            value /= 2;
+            power_of_two += 1;
+        }
+
+        // Теперь value в диапазоне [PRECISION, 2*PRECISION)
+        // Вычисляем ln(value/PRECISION) = ln(1 + (value-PRECISION)/PRECISION)
+        let x_normalized = ((value - PRECISION as u128) * PRECISION as u128 / PRECISION as u128) as i128;
+
+        if x_normalized > 0 {
+            // Ряд Тейлора: ln(1+x) ≈ x - x²/2 + x³/3 - x⁴/4
+            let x2 = x_normalized.saturating_mul(x_normalized) / PRECISION as i128;
+            let x3 = x2.saturating_mul(x_normalized) / PRECISION as i128;
+            let x4 = x3.saturating_mul(x_normalized) / PRECISION as i128;
+
+            result = x_normalized - x2/2 + x3/3 - x4/4;
+        }
+
+        // Добавляем ln(2) * power_of_two
+        // ln(2) ≈ 0.693147... ≈ 693147 в единицах PRECISION
+        const LN_2: i128 = 693147;
+        result += LN_2 * (power_of_two as i128);
+
+        // Ограничиваем результат положительными значениями
+        Ok((result.max(0) as u64))
+    }
+}
+
+impl BondingCurveMath for LogarithmicCurve {
+    fn calculate_buy(&self, sol_amount: u64, current_supply: u64) -> Result<CurveCalculation> {
+        require!(sol_amount > 0, ErrorCode::InvalidAmount);
+        require!(current_supply < self.max_supply, ErrorCode::InvalidInitialSupply);
+
+        let current_price = self.get_current_price(current_supply)?;
+
+        // Используем численную аппроксимацию: делим на маленькие шаги
+        let mut remaining_sol = sol_amount as u128;
+        let mut total_tokens = 0u64;
+        let mut supply = current_supply;
+
+        // Размер шага (1% от текущего supply или минимум 1000 токенов)
+        let step_size = (supply / 100).max(1000);
+
+        while remaining_sol > 0 && supply < self.max_supply {
+            let step = step_size.min(self.max_supply - supply);
+            let price_at_step = self.get_current_price(supply)?;
+
+            let cost = (step as u128)
+                .checked_mul(price_at_step as u128)
+                .ok_or(ErrorCode::MathematicalOverflow)?;
+
+            if cost > remaining_sol {
+                // Последний частичный шаг
+                let partial_tokens = remaining_sol
+                    .checked_mul(step as u128)
+                    .and_then(|x| x.checked_div(cost))
+                    .ok_or(ErrorCode::MathematicalOverflow)? as u64;
+
+                total_tokens = total_tokens
+                    .checked_add(partial_tokens)
+                    .ok_or(ErrorCode::MathematicalOverflow)?;
+                supply = supply
+                    .checked_add(partial_tokens)
+                    .ok_or(ErrorCode::MathematicalOverflow)?;
+                break;
+            }
+
+            remaining_sol = remaining_sol.saturating_sub(cost);
+            total_tokens = total_tokens
+                .checked_add(step)
+                .ok_or(ErrorCode::MathematicalOverflow)?;
+            supply = supply
+                .checked_add(step)
+                .ok_or(ErrorCode::MathematicalOverflow)?;
+        }
+
+        require!(total_tokens > 0, ErrorCode::InvalidAmount);
+
+        let new_supply = current_supply
+            .checked_add(total_tokens)
+            .ok_or(ErrorCode::MathematicalOverflow)?;
+        let new_price = self.get_current_price(new_supply)?;
+        let price_impact = calculate_price_impact(current_price, new_price)?;
+
+        Ok(CurveCalculation {
+            token_amount: total_tokens,
+            sol_amount,
+            new_supply,
+            price_per_token: new_price,
+            price_impact,
+        })
+    }
+
+    fn calculate_sell(&self, token_amount: u64, current_supply: u64) -> Result<CurveCalculation> {
+        require!(token_amount > 0, ErrorCode::InvalidAmount);
+        require!(token_amount <= current_supply, ErrorCode::InsufficientBalance);
+
+        let new_supply = current_supply
+            .checked_sub(token_amount)
+            .ok_or(ErrorCode::MathematicalOverflow)?;
+
+        let current_price = self.get_current_price(current_supply)?;
+        let new_price = self.get_current_price(new_supply)?;
+
+        // Используем среднюю цену для расчета SOL
+        let average_price = current_price
+            .checked_add(new_price)
+            .and_then(|x| x.checked_div(2))
+            .ok_or(ErrorCode::MathematicalOverflow)?;
+
+        let sol_amount = (token_amount as u128)
+            .checked_mul(average_price as u128)
+            .ok_or(ErrorCode::MathematicalOverflow)? as u64;
+
+        let price_impact = calculate_price_impact(current_price, new_price)?;
+
+        Ok(CurveCalculation {
+            token_amount,
+            sol_amount,
+            new_supply,
+            price_per_token: new_price,
+            price_impact,
+        })
+    }
+
+    fn get_current_price(&self, current_supply: u64) -> Result<u64> {
+        // price = base_price + scale * ln(supply + 1)
+        let ln_value = self.ln_approximation(current_supply)?;
+
+        let price_addition = (self.scale as u128)
+            .checked_mul(ln_value as u128)
+            .and_then(|x| x.checked_div(PRECISION as u128))
+            .ok_or(ErrorCode::MathematicalOverflow)? as u64;
+
+        let price = self.base_price
+            .checked_add(price_addition)
+            .ok_or(ErrorCode::MathematicalOverflow)?;
+
+        Ok(price.max(MIN_PRICE))
+    }
+
+    fn get_market_cap(&self, current_supply: u64) -> Result<u64> {
+        let price = self.get_current_price(current_supply)?;
+        current_supply
+            .checked_mul(price)
+            .ok_or(ErrorCode::MathematicalOverflow)
+    }
+}
+
 /// Создание бондинг-кривой по типу
 pub fn create_bonding_curve(curve: &BondingCurve) -> Result<Box<dyn BondingCurveMath>> {
     let max_supply = curve.initial_supply.saturating_mul(10); // Макс supply в 10 раз больше начального
@@ -758,8 +950,26 @@ pub fn create_bonding_curve(curve: &BondingCurve) -> Result<Box<dyn BondingCurve
                 token_reserve,
             )?))
         }
+        CurveType::Logarithmic => {
+            // Для Logarithmic кривой:
+            // - base_price = initial_price
+            // - scale = slope * 10 (масштабирование для видимого эффекта)
+            // Логарифмическая кривая хорошо подходит для токенов с быстрым
+            // ранним ростом и постепенным замедлением
+
+            let base_price = curve.initial_price;
+            // Scale определяет насколько быстро растет цена
+            // Больший scale = более быстрый рост
+            let scale = ((curve.slope * PRECISION as f64) * 10.0) as u64;
+
+            Ok(Box::new(LogarithmicCurve::new(
+                base_price,
+                scale,
+                max_supply,
+            )?))
+        }
         _ => {
-            // Для остальных типов (Logarithmic) используем линейную кривую по умолчанию
+            // Для неизвестных типов используем линейную кривую по умолчанию
             Ok(Box::new(LinearCurve::new(
                 curve.initial_price,
                 (curve.slope * PRECISION as f64) as u64,
@@ -1616,5 +1826,248 @@ mod tests {
 
         // В Linear все покупки по одинаковой средней цене (без учета изменения supply)
         // Это проверяет что CP действительно отличается от Linear
+    }
+
+    // === ТЕСТЫ ДЛЯ LOGARITHMIC КРИВОЙ ===
+
+    #[test]
+    fn test_logarithmic_curve_creation() {
+        // Logarithmic кривая: price = base_price + scale * ln(supply + 1)
+        // Параметры:
+        // - base_price: базовая цена (минимум)
+        // - scale: масштаб логарифма (определяет скорость роста)
+        // - max_supply: максимальный supply
+
+        let log_curve = LogarithmicCurve::new(
+            1000,       // base_price = 1000 lamports
+            500000,     // scale (в единицах PRECISION)
+            1_000_000   // max_supply
+        );
+
+        assert!(log_curve.is_ok());
+        let curve = log_curve.unwrap();
+        assert_eq!(curve.base_price, 1000);
+        assert_eq!(curve.scale, 500000);
+        assert_eq!(curve.max_supply, 1_000_000);
+    }
+
+    #[test]
+    fn test_logarithmic_curve_invalid_params() {
+        // Тест с нулевой base_price (должна быть >= MIN_PRICE)
+        assert!(LogarithmicCurve::new(0, 500000, 1_000_000).is_err());
+
+        // Тест с нулевым scale
+        assert!(LogarithmicCurve::new(1000, 0, 1_000_000).is_err());
+
+        // Тест с нулевым max_supply
+        assert!(LogarithmicCurve::new(1000, 500000, 0).is_err());
+    }
+
+    #[test]
+    fn test_logarithmic_curve_price_calculation() {
+        // Создаем логарифмическую кривую
+        let curve = LogarithmicCurve::new(
+            1000,       // base_price
+            1000000,    // scale (достаточно большой для видимого эффекта)
+            1_000_000   // max_supply
+        ).unwrap();
+
+        // Цена при supply = 0 должна быть = base_price + scale * ln(1) = base_price
+        let price_at_zero = curve.get_current_price(0).unwrap();
+        assert!(price_at_zero >= 1000);
+        assert!(price_at_zero < 2000); // Должна быть близка к base_price
+
+        // Цена должна расти с ростом supply, но все медленнее
+        let price1 = curve.get_current_price(10_000).unwrap();
+        let price2 = curve.get_current_price(100_000).unwrap();
+        let price3 = curve.get_current_price(500_000).unwrap();
+
+        assert!(price2 > price1, "Price should increase");
+        assert!(price3 > price2, "Price should keep increasing");
+
+        // Прирост цены должен замедляться (характеристика логарифма)
+        let growth1 = price2 - price1; // Рост от 10K до 100K (90K токенов)
+        let growth2 = price3 - price2; // Рост от 100K до 500K (400K токенов)
+
+        // На больший интервал (400K) рост должен быть меньше в расчете на токен
+        let growth_rate1 = (growth1 as f64) / 90_000.0;
+        let growth_rate2 = (growth2 as f64) / 400_000.0;
+
+        assert!(growth_rate2 < growth_rate1, "Growth rate should decrease (logarithmic property)");
+    }
+
+    #[test]
+    fn test_logarithmic_curve_diminishing_returns() {
+        // Тест проверяет что логарифмическая кривая демонстрирует убывающую отдачу
+        let curve = LogarithmicCurve::new(1000, 2000000, 1_000_000).unwrap();
+
+        // Измеряем прирост цены на разных участках
+        let p0 = curve.get_current_price(0).unwrap();
+        let p1 = curve.get_current_price(100_000).unwrap();
+        let growth_early = p1 - p0;
+
+        let p2 = curve.get_current_price(500_000).unwrap();
+        let p3 = curve.get_current_price(600_000).unwrap();
+        let growth_late = p3 - p2;
+
+        // Ранний прирост (на первые 100K) должен быть больше позднего (на 100K при 500K supply)
+        assert!(growth_early > growth_late, "Early growth should be larger (diminishing returns)");
+    }
+
+    #[test]
+    fn test_logarithmic_curve_market_cap() {
+        let curve = LogarithmicCurve::new(1000, 1000000, 1_000_000).unwrap();
+
+        // Market cap при supply = 100000
+        let supply = 100_000;
+        let price = curve.get_current_price(supply).unwrap();
+        let market_cap = curve.get_market_cap(supply).unwrap();
+
+        // Market cap должен быть = supply * current_price
+        assert_eq!(market_cap, supply * price);
+
+        // Market cap должен расти с ростом supply
+        let market_cap2 = curve.get_market_cap(200_000).unwrap();
+        assert!(market_cap2 > market_cap);
+    }
+
+    #[test]
+    fn test_logarithmic_curve_buy_calculation() {
+        let curve = LogarithmicCurve::new(1000, 1000000, 1_000_000).unwrap();
+
+        // Тест покупки за 1000000 lamports при текущем supply = 50000
+        let result = curve.calculate_buy(1_000_000, 50_000).unwrap();
+
+        assert!(result.token_amount > 0, "Should receive some tokens");
+        assert_eq!(result.sol_amount, 1_000_000, "SOL amount should match");
+        assert_eq!(result.new_supply, 50_000 + result.token_amount, "Supply should increase");
+        assert!(result.price_per_token > 0, "Price per token should be positive");
+        assert!(result.price_impact < 10000, "Price impact should be less than 100%");
+
+        // Проверка что supply не превышает max_supply
+        assert!(result.new_supply <= curve.max_supply, "New supply should not exceed max");
+    }
+
+    #[test]
+    fn test_logarithmic_curve_sell_calculation() {
+        let curve = LogarithmicCurve::new(1000, 1000000, 1_000_000).unwrap();
+
+        // Тест продажи 10000 токенов при текущем supply = 500000
+        let result = curve.calculate_sell(10_000, 500_000).unwrap();
+
+        assert_eq!(result.token_amount, 10_000, "Token amount should match");
+        assert!(result.sol_amount > 0, "Should receive some SOL");
+        assert_eq!(result.new_supply, 490_000, "Supply should decrease");
+        assert!(result.price_per_token > 0, "Price per token should be positive");
+    }
+
+    #[test]
+    fn test_logarithmic_curve_buy_sell_symmetry() {
+        let curve = LogarithmicCurve::new(1000, 1000000, 1_000_000).unwrap();
+
+        let initial_supply = 200_000;
+
+        // Покупаем токены
+        let buy_result = curve.calculate_buy(5_000_000, initial_supply).unwrap();
+        let new_supply = buy_result.new_supply;
+        let tokens_bought = buy_result.token_amount;
+
+        // Продаем те же токены обратно
+        let sell_result = curve.calculate_sell(tokens_bought, new_supply).unwrap();
+
+        // Должны вернуться к исходному supply
+        assert_eq!(sell_result.new_supply, initial_supply);
+
+        // SOL полученный от продажи должен быть примерно равен SOL потраченному на покупку
+        // (может быть небольшая разница из-за округления)
+        let sol_difference = if buy_result.sol_amount > sell_result.sol_amount {
+            buy_result.sol_amount - sell_result.sol_amount
+        } else {
+            sell_result.sol_amount - buy_result.sol_amount
+        };
+
+        // Разница должна быть небольшой (менее 5% от исходной суммы)
+        assert!(sol_difference < buy_result.sol_amount / 20, "Buy/sell should be roughly symmetric");
+    }
+
+    #[test]
+    fn test_logarithmic_curve_edge_cases() {
+        let curve = LogarithmicCurve::new(MIN_PRICE, 1000000, 1_000_000).unwrap();
+
+        // Тест с минимальной ценой
+        let price = curve.get_current_price(0).unwrap();
+        assert!(price >= MIN_PRICE);
+
+        // Тест покупки при максимальном supply (должна быть ошибка)
+        let result = curve.calculate_buy(1000, curve.max_supply);
+        assert!(result.is_err(), "Cannot buy at max supply");
+
+        // Тест продажи больше чем есть в supply (должна быть ошибка)
+        let result = curve.calculate_sell(2000, 1000);
+        assert!(result.is_err(), "Cannot sell more than current supply");
+
+        // Тест продажи при supply = 0 (должна быть ошибка)
+        let result = curve.calculate_sell(100, 0);
+        assert!(result.is_err(), "Cannot sell from zero supply");
+    }
+
+    #[test]
+    fn test_logarithmic_vs_exponential() {
+        // Логарифмическая и экспоненциальная кривые имеют противоположные характеристики
+        let log_curve = LogarithmicCurve::new(1000, 2000000, 1_000_000).unwrap();
+        let exp_curve = ExponentialCurve::new(1000, 1000000, 1_000_000).unwrap();
+
+        // В начале логарифмическая растет быстрее
+        let log_price_early = log_curve.get_current_price(10_000).unwrap();
+        let exp_price_early = exp_curve.get_current_price(10_000).unwrap();
+
+        // В конце экспоненциальная обгоняет логарифмическую
+        let log_price_late = log_curve.get_current_price(500_000).unwrap();
+        let exp_price_late = exp_curve.get_current_price(500_000).unwrap();
+
+        // Проверяем что обе цены положительные и растут
+        assert!(log_price_early > 0);
+        assert!(log_price_late > log_price_early);
+        assert!(exp_price_late > exp_price_early);
+
+        // Экспоненциальная должна расти быстрее в долгосрочной перспективе
+        let log_growth_rate = (log_price_late as f64) / (log_price_early as f64);
+        let exp_growth_rate = (exp_price_late as f64) / (exp_price_early as f64);
+
+        assert!(exp_growth_rate > log_growth_rate, "Exponential should grow faster than logarithmic");
+    }
+
+    #[test]
+    fn test_logarithmic_natural_log_approximation() {
+        // Тест проверяет что наша аппроксимация ln(x) работает корректно
+        let curve = LogarithmicCurve::new(1000, 1000000, 1_000_000).unwrap();
+
+        // Проверяем несколько известных значений
+        // ln(1) = 0, поэтому price(0) должна быть близка к base_price
+        let price_0 = curve.get_current_price(0).unwrap();
+        assert!(price_0 >= 1000 && price_0 < 1100, "Price at supply 0 should be close to base_price");
+
+        // ln(e) ≈ 1, ln(e^2) ≈ 2, и т.д.
+        // Проверяем что цена растет логарифмически
+        let price_10 = curve.get_current_price(10).unwrap();
+        let price_100 = curve.get_current_price(100).unwrap();
+        let price_1000 = curve.get_current_price(1000).unwrap();
+
+        // Цены должны расти, но все медленнее
+        assert!(price_100 > price_10);
+        assert!(price_1000 > price_100);
+
+        // Проверка логарифмического свойства: ln(10x) = ln(10) + ln(x)
+        // Разница между ценами должна быть примерно одинаковой
+        let diff1 = price_100 - price_10;  // рост от 10 до 100
+        let diff2 = price_1000 - price_100; // рост от 100 до 1000
+
+        // Разница не должна сильно отличаться (в пределах 50%)
+        let ratio = if diff1 > diff2 {
+            diff1 as f64 / diff2 as f64
+        } else {
+            diff2 as f64 / diff1 as f64
+        };
+        assert!(ratio < 2.0, "Logarithmic growth should be consistent");
     }
 }
