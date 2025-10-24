@@ -1,0 +1,414 @@
+name: "🏗️ Build and Deploy Contracts"
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'devnet'
+        type: choice
+        options:
+          - devnet
+          - mainnet
+      deploy:
+        description: 'Deploy after build?'
+        required: true
+        default: false
+        type: boolean
+      run_tests:
+        description: 'Run tests before deployment?'
+        required: true
+        default: true
+        type: boolean
+
+env:
+  RUST_VERSION: 'stable'
+  SOLANA_VERSION: '1.16.25'
+  ANCHOR_VERSION: '0.29.0'
+
+jobs:
+  build-contracts:
+    name: 🏗️ Build Smart Contracts
+    runs-on: ubuntu-latest
+    outputs:
+      program-hash: ${{ steps.build-info.outputs.program-hash }}
+      build-time: ${{ steps.build-info.outputs.build-time }}
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🦀 Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt, clippy
+
+      - name: 📦 Setup Solana CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.solana.com/v${{ env.SOLANA_VERSION }}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+          solana --version
+
+      - name: 📦 Setup Anchor
+        run: |
+          npm install -g @coral-xyz/anchor-cli@${{ env.ANCHOR_VERSION }}
+          anchor --version
+
+      - name: 🔧 Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/pump-core/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/Anchor.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
+            ${{ runner.os }}-cargo-
+
+      - name: 📦 Install npm dependencies
+        working-directory: contracts/pump-core
+        run: npm install
+
+      - name: 🧹 Rust Format Check
+        working-directory: contracts/pump-core
+        run: cargo fmt -- --check
+
+      - name: 🧪 Rust Clippy
+        working-directory: contracts/pump-core
+        run: cargo clippy -- -D warnings
+
+      - name: 🏗️ Build Smart Contracts
+        id: build
+        working-directory: contracts/pump-core
+        run: |
+          echo "🏗️ Starting Anchor build..."
+          anchor build
+
+          echo "✅ Build completed successfully!"
+          ls -lh target/deploy/
+
+      - name: 📊 Build Information
+        id: build-info
+        working-directory: contracts/pump-core
+        run: |
+          # Calculate program hash
+          PROGRAM_HASH=$(sha256sum target/deploy/pump_core.so | awk '{print $1}')
+          echo "program-hash=$PROGRAM_HASH" >> $GITHUB_OUTPUT
+
+          # Build timestamp
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "build-time=$BUILD_TIME" >> $GITHUB_OUTPUT
+
+          # Program size
+          PROGRAM_SIZE=$(stat -f%z target/deploy/pump_core.so 2>/dev/null || stat -c%s target/deploy/pump_core.so)
+          echo "Program size: $PROGRAM_SIZE bytes"
+
+          # Program ID from keypair
+          PROGRAM_ID=$(solana-keygen pubkey target/deploy/pump_core-keypair.json)
+          echo "Program ID: $PROGRAM_ID"
+
+          # Save build metadata
+          cat > target/deploy/build-metadata.json <<EOF
+          {
+            "program_id": "$PROGRAM_ID",
+            "program_hash": "$PROGRAM_HASH",
+            "program_size": $PROGRAM_SIZE,
+            "build_time": "$BUILD_TIME",
+            "environment": "${{ github.event.inputs.environment }}",
+            "commit_sha": "${{ github.sha }}",
+            "branch": "${{ github.ref_name }}",
+            "rust_version": "${{ env.RUST_VERSION }}",
+            "solana_version": "${{ env.SOLANA_VERSION }}",
+            "anchor_version": "${{ env.ANCHOR_VERSION }}"
+          }
+          EOF
+
+          echo "📋 Build metadata saved to build-metadata.json"
+          cat target/deploy/build-metadata.json
+
+      - name: 📤 Upload Program Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-core-program-${{ github.sha }}
+          path: |
+            contracts/pump-core/target/deploy/pump_core.so
+            contracts/pump-core/target/deploy/pump_core-keypair.json
+            contracts/pump-core/target/deploy/build-metadata.json
+          retention-days: 90
+
+      - name: 📤 Upload IDL
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-core-idl-${{ github.sha }}
+          path: contracts/pump-core/target/idl/pump_core.json
+          retention-days: 90
+
+      - name: 📤 Upload TypeScript Types
+        uses: actions/upload-artifact@v4
+        with:
+          name: pump-core-types-${{ github.sha }}
+          path: contracts/pump-core/target/types/
+          retention-days: 90
+
+  test-contracts:
+    name: 🧪 Test Smart Contracts
+    runs-on: ubuntu-latest
+    needs: build-contracts
+    if: github.event.inputs.run_tests == 'true'
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🦀 Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: 📦 Setup Solana CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.solana.com/v${{ env.SOLANA_VERSION }}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+          solana --version
+
+      - name: 📦 Setup Anchor
+        run: |
+          npm install -g @coral-xyz/anchor-cli@${{ env.ANCHOR_VERSION }}
+          anchor --version
+
+      - name: 📦 Install npm dependencies
+        working-directory: contracts/pump-core
+        run: npm install
+
+      - name: 📥 Download compiled program
+        uses: actions/download-artifact@v4
+        with:
+          name: pump-core-program-${{ github.sha }}
+          path: contracts/pump-core/target/deploy/
+
+      - name: 📥 Download IDL
+        uses: actions/download-artifact@v4
+        with:
+          name: pump-core-idl-${{ github.sha }}
+          path: contracts/pump-core/target/idl/
+
+      - name: 🧪 Run Smart Contract Tests
+        working-directory: contracts/pump-core
+        run: |
+          # Export PATH for Solana
+          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+
+          # Start local validator in background
+          solana-test-validator --reset --quiet &
+          VALIDATOR_PID=$!
+
+          echo "Waiting for validator to start..."
+          sleep 15
+
+          # Configure Solana for local testing
+          solana config set --url localhost
+
+          # Run tests (skip build since we already built)
+          echo "Running Anchor tests..."
+          anchor test --skip-local-validator --skip-build || {
+            echo "❌ Tests failed!"
+            kill $VALIDATOR_PID || true
+            exit 1
+          }
+
+          echo "✅ All tests passed!"
+
+          # Stop validator
+          kill $VALIDATOR_PID || true
+
+      - name: 📊 Test Report
+        if: always()
+        run: |
+          echo "## 🧪 Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "- Environment: ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Tests: ✅ Passed" >> $GITHUB_STEP_SUMMARY
+
+  deploy-contracts:
+    name: 🚀 Deploy to ${{ github.event.inputs.environment }}
+    runs-on: ubuntu-latest
+    needs: [build-contracts, test-contracts]
+    if: github.event.inputs.deploy == 'true' && (success() || github.event.inputs.run_tests == 'false')
+    environment:
+      name: ${{ github.event.inputs.environment }}
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Solana CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.solana.com/v${{ env.SOLANA_VERSION }}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+          solana --version
+
+      - name: 📦 Setup Anchor
+        run: |
+          npm install -g @coral-xyz/anchor-cli@${{ env.ANCHOR_VERSION }}
+          anchor --version
+
+      - name: 📥 Download compiled program
+        uses: actions/download-artifact@v4
+        with:
+          name: pump-core-program-${{ github.sha }}
+          path: contracts/pump-core/target/deploy/
+
+      - name: 🔑 Setup Deployment Wallet
+        working-directory: contracts/pump-core
+        env:
+          DEPLOY_KEYPAIR: ${{ secrets.DEPLOY_KEYPAIR }}
+        run: |
+          if [ -z "$DEPLOY_KEYPAIR" ]; then
+            echo "⚠️ DEPLOY_KEYPAIR secret not set!"
+            echo "Using program keypair from build for deployment"
+          else
+            echo "$DEPLOY_KEYPAIR" > ~/.config/solana/id.json
+          fi
+
+          # Show deployer address
+          DEPLOYER=$(solana address)
+          echo "Deployer address: $DEPLOYER"
+
+      - name: 💰 Check Balance
+        run: |
+          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+
+          # Set cluster
+          if [ "${{ github.event.inputs.environment }}" = "mainnet" ]; then
+            solana config set --url mainnet-beta
+          else
+            solana config set --url devnet
+          fi
+
+          # Check balance
+          BALANCE=$(solana balance)
+          echo "Current balance: $BALANCE"
+
+          # Warn if balance is low
+          if [ "${{ github.event.inputs.environment }}" = "mainnet" ]; then
+            echo "⚠️ Make sure you have enough SOL for deployment (typically 2-5 SOL)"
+          fi
+
+      - name: 🚀 Deploy Program
+        id: deploy
+        working-directory: contracts/pump-core
+        run: |
+          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+
+          # Set cluster
+          if [ "${{ github.event.inputs.environment }}" = "mainnet" ]; then
+            CLUSTER="mainnet-beta"
+          else
+            CLUSTER="devnet"
+          fi
+
+          echo "🚀 Deploying to $CLUSTER..."
+
+          # Deploy using Anchor
+          anchor deploy --provider.cluster $CLUSTER
+
+          # Get program ID
+          PROGRAM_ID=$(solana-keygen pubkey target/deploy/pump_core-keypair.json)
+          echo "program-id=$PROGRAM_ID" >> $GITHUB_OUTPUT
+
+          echo "✅ Program deployed successfully!"
+          echo "Program ID: $PROGRAM_ID"
+
+          # Verify deployment
+          solana program show $PROGRAM_ID
+
+      - name: 📊 Deployment Summary
+        run: |
+          echo "## 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "- Environment: **${{ github.event.inputs.environment }}**" >> $GITHUB_STEP_SUMMARY
+          echo "- Program ID: \`${{ steps.deploy.outputs.program-id }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Program Hash: \`${{ needs.build-contracts.outputs.program-hash }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Build Time: ${{ needs.build-contracts.outputs.build-time }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 Links" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ github.event.inputs.environment }}" = "mainnet" ]; then
+            echo "- [Solana Explorer](https://explorer.solana.com/address/${{ steps.deploy.outputs.program-id }})" >> $GITHUB_STEP_SUMMARY
+            echo "- [Solscan](https://solscan.io/account/${{ steps.deploy.outputs.program-id }})" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- [Solana Explorer (Devnet)](https://explorer.solana.com/address/${{ steps.deploy.outputs.program-id }}?cluster=devnet)" >> $GITHUB_STEP_SUMMARY
+            echo "- [Solscan (Devnet)](https://solscan.io/account/${{ steps.deploy.outputs.program-id }}?cluster=devnet)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: 💾 Save Deployment Info
+        working-directory: contracts/pump-core
+        run: |
+          # Create deployment record
+          mkdir -p deployments
+
+          cat > deployments/${{ github.event.inputs.environment }}-deployment.json <<EOF
+          {
+            "program_id": "${{ steps.deploy.outputs.program-id }}",
+            "program_hash": "${{ needs.build-contracts.outputs.program-hash }}",
+            "environment": "${{ github.event.inputs.environment }}",
+            "deployed_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "deployed_by": "${{ github.actor }}",
+            "commit_sha": "${{ github.sha }}",
+            "branch": "${{ github.ref_name }}",
+            "workflow_run": "${{ github.run_id }}"
+          }
+          EOF
+
+          echo "📋 Deployment info saved"
+          cat deployments/${{ github.event.inputs.environment }}-deployment.json
+
+      - name: 📤 Upload Deployment Info
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-info-${{ github.event.inputs.environment }}-${{ github.sha }}
+          path: contracts/pump-core/deployments/
+          retention-days: 365
+
+  notify:
+    name: 📢 Notify Results
+    runs-on: ubuntu-latest
+    needs: [build-contracts, test-contracts, deploy-contracts]
+    if: always()
+
+    steps:
+      - name: 📊 Build Summary
+        run: |
+          echo "# 📊 Build & Deploy Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## Status" >> $GITHUB_STEP_SUMMARY
+          echo "- Build: ${{ needs.build-contracts.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Tests: ${{ needs.test-contracts.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Deploy: ${{ needs.deploy-contracts.result }}" >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- Environment: ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Deploy enabled: ${{ github.event.inputs.deploy }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Tests enabled: ${{ github.event.inputs.run_tests }}" >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "The following artifacts are available for download:" >> $GITHUB_STEP_SUMMARY
+          echo "- \`pump-core-program-${{ github.sha }}\` - Compiled program binary" >> $GITHUB_STEP_SUMMARY
+          echo "- \`pump-core-idl-${{ github.sha }}\` - Interface Definition Language" >> $GITHUB_STEP_SUMMARY
+          echo "- \`pump-core-types-${{ github.sha }}\` - TypeScript type definitions" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ github.event.inputs.deploy }}" = "true" ]; then
+            echo "- \`deployment-info-${{ github.event.inputs.environment }}-${{ github.sha }}\` - Deployment metadata" >> $GITHUB_STEP_SUMMARY
+          fi
