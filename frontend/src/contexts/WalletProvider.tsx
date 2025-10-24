@@ -1,6 +1,18 @@
 /**
  * 💰 Wallet Provider для интеграции с Solana кошельками
- * Production-ready провайдер с поддержкой Phantom, Solflare и других
+ * Production-ready провайдер с поддержкой 13 популярных кошельков
+ *
+ * Поддерживаемые кошельки:
+ * - Phantom (самый популярный)
+ * - Solflare (официальный кошелек Solana)
+ * - Backpack (xNFT поддержка)
+ * - Glow (фокус на безопасность)
+ * - Slope (мобильный + десктоп)
+ * - Exodus (мультивалютный)
+ * - Torus (web-based, OAuth)
+ * - Sollet & Sollet Extension (классический)
+ * - Ledger (аппаратный кошелек)
+ * - MathWallet, Coin98, TrustWallet
  */
 
 'use client'
@@ -17,6 +29,12 @@ import {
   MathWalletAdapter,
   Coin98WalletAdapter,
   TrustWalletAdapter,
+  BackpackWalletAdapter,
+  GlowWalletAdapter,
+  SlopeWalletAdapter,
+  ExodusWalletAdapter,
+  SolletExtensionWalletAdapter,
+  SolletWalletAdapter,
 } from '@solana/wallet-adapter-wallets'
 import { clusterApiUrl } from '@solana/web3.js'
 import toast from 'react-hot-toast'
@@ -53,22 +71,28 @@ export const WalletContextProvider: FC<WalletContextProviderProps> = ({ children
   // Конфигурация поддерживаемых кошельков
   const wallets = useMemo(
     () => [
-      // Phantom - самый популярный кошелек
-      new PhantomWalletAdapter(),
-      
-      // Solflare - официальный кошелек Solana
-      new SolflareWalletAdapter({ network }),
-      
-      // Torus - web-based кошелек
-      new TorusWalletAdapter(),
-      
-      // Ledger - аппаратный кошелек
-      new LedgerWalletAdapter(),
-      
-      // Другие популярные кошельки
-      new MathWalletAdapter(),
-      new Coin98WalletAdapter(),
-      new TrustWalletAdapter(),
+      // ТОП-2 самых популярных кошелька
+      new PhantomWalletAdapter(), // Самый популярный
+      new SolflareWalletAdapter({ network }), // Официальный кошелек Solana
+
+      // Современные популярные кошельки
+      new BackpackWalletAdapter(), // Новый популярный кошелек от Coral (xNFT)
+      new GlowWalletAdapter(), // Кошелек с фокусом на безопасность
+      new SlopeWalletAdapter(), // Мобильный + десктоп
+      new ExodusWalletAdapter(), // Мультивалютный кошелек
+
+      // Web-based и расширения
+      new TorusWalletAdapter(), // Web-based кошелек (OAuth)
+      new SolletWalletAdapter({ network }), // Классический web кошелек
+      new SolletExtensionWalletAdapter({ network }), // Расширение браузера
+
+      // Аппаратный кошелек
+      new LedgerWalletAdapter(), // Ledger hardware wallet
+
+      // Другие кошельки
+      new MathWalletAdapter(), // Math Wallet
+      new Coin98WalletAdapter(), // Coin98
+      new TrustWalletAdapter(), // Trust Wallet
     ],
     [network]
   )
@@ -131,15 +155,19 @@ export const getWalletIcon = (walletName: string): string => {
   const icons: Record<string, string> = {
     'Phantom': '👻',
     'Solflare': '🔥',
+    'Backpack': '🎒',
+    'Glow': '✨',
+    'Slope': '📈',
+    'Exodus': '🚀',
     'Torus': '🌀',
-    'Ledger': '🔒',
     'Sollet': '💼',
+    'Sollet Extension': '💼',
+    'Ledger': '🔒',
     'MathWallet': '📊',
     'Coin98': '🪙',
-    'Slope': '📈',
     'Trust Wallet': '🛡️',
   }
-  
+
   return icons[walletName] || '💰'
 }
 
@@ -147,16 +175,19 @@ export const getWalletDisplayName = (walletName: string): string => {
   const displayNames: Record<string, string> = {
     'Phantom': 'Phantom',
     'Solflare': 'Solflare',
+    'Backpack': 'Backpack',
+    'Glow': 'Glow',
+    'Slope': 'Slope',
+    'Exodus': 'Exodus',
     'Torus': 'Torus',
-    'Ledger': 'Ledger',
     'Sollet': 'Sollet',
-    'Sollet Extension': 'Sollet (Extension)',
+    'Sollet Extension': 'Sollet Extension',
+    'Ledger': 'Ledger',
     'MathWallet': 'Math Wallet',
     'Coin98': 'Coin98',
-    'Slope': 'Slope',
     'Trust Wallet': 'Trust Wallet',
   }
-  
+
   return displayNames[walletName] || walletName
 }
 
