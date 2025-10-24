@@ -355,6 +355,28 @@ pub enum ErrorCode {
 
     #[msg("Mint authority required")]
     MintAuthorityRequired, // 6915
+
+    // === LP TOKEN LOCK (6916-6925) ===
+    #[msg("Lock period not expired yet")]
+    LockPeriodNotExpired, // 6916
+
+    #[msg("Lock duration too short")]
+    LockDurationTooShort, // 6917
+
+    #[msg("Lock duration too long")]
+    LockDurationTooLong, // 6918
+
+    #[msg("LP tokens already unlocked")]
+    AlreadyUnlocked, // 6919
+
+    #[msg("Liquidity not locked")]
+    LiquidityNotLocked, // 6920
+
+    #[msg("Invalid lock duration")]
+    InvalidLockDuration, // 6921
+
+    #[msg("Cannot unlock before vesting period")]
+    VestingPeriodNotComplete, // 6922
 }
 
 impl ErrorCode {
