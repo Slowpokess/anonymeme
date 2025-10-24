@@ -119,6 +119,9 @@ export default function HomePage() {
             <Link href="/create" className="text-gray-300 hover:text-white transition-colors">
               Создать токен
             </Link>
+            <Link href="/simulator" className="text-gray-300 hover:text-white transition-colors">
+              Симулятор
+            </Link>
             <Link href="/analytics" className="text-gray-300 hover:text-white transition-colors">
               Аналитика
             </Link>
