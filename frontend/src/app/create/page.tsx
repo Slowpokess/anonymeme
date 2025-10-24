@@ -409,20 +409,65 @@ export default function CreateTokenPage() {
             {/* Тип кривой */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Тип бондинг-кривой
+                Тип бондинг-кривой *
               </label>
               <select
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                 value={formData.curve_type}
                 onChange={(e) => handleInputChange('curve_type', e.target.value as CurveType)}
               >
-                <option value={CurveType.EXPONENTIAL}>Экспоненциальная (рекомендуется)</option>
-                <option value={CurveType.LINEAR}>Линейная</option>
-                <option value={CurveType.LOGARITHMIC}>Логарифмическая</option>
+                <option value={CurveType.LINEAR}>
+                  Линейная - Равномерный рост цены (начинающим)
+                </option>
+                <option value={CurveType.EXPONENTIAL}>
+                  Экспоненциальная - Быстрый рост цены (популярная)
+                </option>
+                <option value={CurveType.SIGMOID}>
+                  Сигмоидная - Плавный S-образный рост (сбалансированная)
+                </option>
+                <option value={CurveType.CONSTANT_PRODUCT}>
+                  Constant Product - Как Uniswap (продвинутая)
+                </option>
+                <option value={CurveType.LOGARITHMIC}>
+                  Логарифмическая - Замедляющийся рост (для стабильности)
+                </option>
               </select>
-              <p className="text-xs text-gray-500 mt-1">
-                Экспоненциальная кривая обеспечивает лучшую защиту от манипуляций
-              </p>
+
+              {/* Динамическое описание в зависимости от выбранной кривой */}
+              <div className="mt-2 p-3 bg-blue-50 rounded-md border border-blue-100">
+                <p className="text-xs text-blue-900">
+                  {formData.curve_type === CurveType.LINEAR && (
+                    <>
+                      <strong>Линейная:</strong> Цена растет равномерно с постоянной скоростью.
+                      Идеально для начинающих, предсказуемый рост без резких скачков.
+                    </>
+                  )}
+                  {formData.curve_type === CurveType.EXPONENTIAL && (
+                    <>
+                      <strong>Экспоненциальная:</strong> Цена растет экспоненциально быстрее с каждой покупкой.
+                      Популярный выбор для мемкоинов, обеспечивает защиту от манипуляций и создает FOMO эффект.
+                    </>
+                  )}
+                  {formData.curve_type === CurveType.SIGMOID && (
+                    <>
+                      <strong>Сигмоидная:</strong> S-образная кривая - медленный старт, быстрый средний рост, плавное замедление.
+                      Сбалансированный выбор для долгосрочных проектов с контролируемой волатильностью.
+                    </>
+                  )}
+                  {formData.curve_type === CurveType.CONSTANT_PRODUCT && (
+                    <>
+                      <strong>Constant Product:</strong> Работает как Uniswap (x × y = k).
+                      Продвинутый вариант с автоматическим балансированием ликвидности, подходит для опытных создателей.
+                    </>
+                  )}
+                  {formData.curve_type === CurveType.LOGARITHMIC && (
+                    <>
+                      <strong>Логарифмическая:</strong> Быстрый рост в начале, затем постепенное замедление.
+                      Идеальна для стабильных токенов с контролируемой инфляцией и защитой от pump & dump.
+                    </>
+                  )}
+                </p>
+              </div>
             </div>
 
             {/* Социальные ссылки */}
