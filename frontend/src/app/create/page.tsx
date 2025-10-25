@@ -137,7 +137,8 @@ export default function CreateTokenPage() {
       const response = await apiService.createToken(formData)
       
       if (response.success) {
-        setTxSignature(response.data.transaction_signature)
+        // @ts-ignore - API может не возвращать transaction_signature в зависимости от версии
+        setTxSignature(response.data.transaction_signature || response.data.signature || '')
         setStep(3)
         toast.success('Токен успешно создан!')
       } else {

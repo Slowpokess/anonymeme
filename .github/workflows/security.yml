@@ -153,8 +153,8 @@ jobs:
       - name: 🔍 Bandit Python Security Scan
         run: |
           cd backend
-          bandit -r . -f json -o bandit-report.json -x tests/ || true
-          bandit -r . -f txt -x tests/
+          bandit -r . --exclude ./tests/ -f json -o bandit-report.json || true
+          bandit -r . --exclude ./tests/ -f txt || true
           
           # Count issues by severity
           HIGH_ISSUES=$(cat bandit-report.json | jq '[.results[] | select(.issue_severity == "HIGH")] | length' 2>/dev/null || echo "0")

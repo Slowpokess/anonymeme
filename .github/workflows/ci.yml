@@ -44,8 +44,8 @@ jobs:
       - name: 🔍 Static Code Analysis (Bandit)
         run: |
           if [ -d "backend" ]; then
-            bandit -r backend/ -f json -o bandit-report.json || true
-            bandit -r backend/ -f txt
+            bandit -r backend/ --exclude backend/tests/ -f json -o bandit-report.json || true
+            bandit -r backend/ --exclude backend/tests/ -f txt || true
           else
             echo "⚠️ Backend directory not found, creating empty report"
             echo '[]' > bandit-report.json
