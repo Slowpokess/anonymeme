@@ -46,20 +46,26 @@ class TestMigrationRunner:
         runner.migrations_dir = temp_migrations_dir
         
         migrations = runner.get_migration_files()
-        
-        assert len(migrations) == 2
-        assert migrations[0]['version'] == '001'
-        assert migrations[1]['version'] == '002'
-        assert 'CREATE TABLE' in migrations[0]['content']
+
+        if len(migrations) != 2:
+            raise AssertionError(f"Ожидалось 2 миграции, получено: {len(migrations)}")
+        if migrations[0]['version'] != '001':
+            raise AssertionError(f"Ожидалась версия '001', получена: {migrations[0]['version']}")
+        if migrations[1]['version'] != '002':
+            raise AssertionError(f"Ожидалась версия '002', получена: {migrations[1]['version']}")
+        if 'CREATE TABLE' not in migrations[0]['content']:
+            raise AssertionError("Ожидалось 'CREATE TABLE' в содержимом миграции")
     
     def test_calculate_checksum(self, runner):
         """Тест вычисления контрольной суммы"""
         content = "CREATE TABLE test;"
         checksum1 = runner.calculate_checksum(content)
         checksum2 = runner.calculate_checksum(content)
-        
-        assert checksum1 == checksum2
-        assert len(checksum1) == 64  # SHA256 в hex
+
+        if checksum1 != checksum2:
+            raise AssertionError(f"Контрольные суммы не совпадают: {checksum1} != {checksum2}")
+        if len(checksum1) != 64:
+            raise AssertionError(f"Длина контрольной суммы должна быть 64 (SHA256), получено: {len(checksum1)}")
     
     @pytest.mark.asyncio
     async def test_apply_migration_success(self, runner):
@@ -76,9 +82,11 @@ class TestMigrationRunner:
         runner.connection.execute = AsyncMock()
         
         result = await runner.apply_migration(migration)
-        
-        assert result is True
-        assert runner.connection.execute.call_count == 2  # Миграция + запись в лог
+
+        if result is not True:
+            raise AssertionError(f"Ожидался результат True, получено: {result}")
+        if runner.connection.execute.call_count != 2:
+            raise AssertionError(f"Ожидалось 2 вызова execute, получено: {runner.connection.execute.call_count}")
     
     @pytest.mark.asyncio
     async def test_apply_migration_failure(self, runner):
@@ -95,8 +103,9 @@ class TestMigrationRunner:
         runner.connection.execute = AsyncMock(side_effect=Exception("SQL Error"))
         
         result = await runner.apply_migration(migration)
-        
-        assert result is False
+
+        if result is not False:
+            raise AssertionError(f"Ожидался результат False при ошибке, получено: {result}")
     
     @pytest.mark.asyncio
     async def test_get_applied_migrations(self, runner):
@@ -109,24 +118,27 @@ class TestMigrationRunner:
         runner.connection.fetch = AsyncMock(return_value=mock_rows)
         
         applied = await runner.get_applied_migrations()
-        
-        assert applied == ['001', '002']
+
+        if applied != ['001', '002']:
+            raise AssertionError(f"Ожидалось ['001', '002'], получено: {applied}")
     
     def test_validate_migrations_success(self, runner, temp_migrations_dir):
         """Тест успешной валидации миграций"""
         runner.migrations_dir = temp_migrations_dir
         
         result = asyncio.run(runner.validate_migrations())
-        
-        assert result is True
+
+        if result is not True:
+            raise AssertionError(f"Валидация миграций должна быть успешной, получено: {result}")
     
     def test_validate_migrations_empty(self, runner):
         """Тест валидации пустой папки миграций"""
         runner.migrations_dir = Path("/nonexistent")
         
         result = asyncio.run(runner.validate_migrations())
-        
-        assert result is False
+
+        if result is not False:
+            raise AssertionError(f"Валидация пустой папки должна возвращать False, получено: {result}")
 
 
 class TestMigrationIntegration:
@@ -150,16 +162,17 @@ class TestMigrationIntegration:
             content = migration_file.read_text()
             
             # Базовые проверки синтаксиса
-            assert content.strip(), f"Empty migration: {migration_file.name}"
-            assert "DO $$" in content or "CREATE" in content or "ALTER" in content, \
-                f"No SQL commands found in: {migration_file.name}"
+            if not content.strip():
+                raise AssertionError(f"Empty migration: {migration_file.name}")
+            if not ("DO $$" in content or "CREATE" in content or "ALTER" in content):
+                raise AssertionError(f"No SQL commands found in: {migration_file.name}")
             
             # Проверка на опасные команды в продакшене
             dangerous_commands = ["DROP DATABASE", "DROP SCHEMA"]
             content_upper = content.upper()
             for cmd in dangerous_commands:
-                assert cmd not in content_upper, \
-                    f"Dangerous command '{cmd}' found in: {migration_file.name}"
+                if cmd in content_upper:
+                    raise AssertionError(f"Dangerous command '{cmd}' found in: {migration_file.name}")
 
 
 class TestDatabaseConnection:
@@ -196,11 +209,15 @@ class TestDatabaseConnection:
             db_manager._pool.get_idle_size.return_value = 3
             
             health = await db_manager.health_check()
-            
-            assert health["status"] == "healthy"
-            assert health["sqlalchemy"] is True
-            assert health["asyncpg"] is True
-            assert "pool_stats" in health
+
+            if health["status"] != "healthy":
+                raise AssertionError(f"Ожидался статус 'healthy', получено: {health['status']}")
+            if health["sqlalchemy"] is not True:
+                raise AssertionError(f"SQLAlchemy должна быть healthy: {health.get('sqlalchemy')}")
+            if health["asyncpg"] is not True:
+                raise AssertionError(f"asyncpg должна быть healthy: {health.get('asyncpg')}")
+            if "pool_stats" not in health:
+                raise AssertionError("Ожидалось поле 'pool_stats' в health")
     
     @pytest.mark.asyncio
     async def test_health_check_unhealthy(self, db_manager):
@@ -210,9 +227,11 @@ class TestDatabaseConnection:
             mock_session.side_effect = Exception("Connection failed")
             
             health = await db_manager.health_check()
-            
-            assert health["status"] == "unhealthy"
-            assert "error" in health
+
+            if health["status"] != "unhealthy":
+                raise AssertionError(f"Ожидался статус 'unhealthy', получено: {health['status']}")
+            if "error" not in health:
+                raise AssertionError("Ожидалось поле 'error' в health")
 
 
 class TestPerformanceOptimizations:
@@ -244,7 +263,8 @@ class TestPerformanceOptimizations:
         
         for pattern in critical_patterns:
             found = any(pattern in idx for idx in all_indexes)
-            assert found, f"Missing critical index for: {pattern}"
+            if not found:
+                raise AssertionError(f"Missing critical index for: {pattern}")
     
     def test_foreign_key_indexes(self):
         """Проверка индексов на внешних ключах"""
@@ -270,8 +290,8 @@ class TestPerformanceOptimizations:
         
         # В идеале каждый FK должен иметь индекс
         # Это упрощенная проверка
-        assert len(indexes) >= len(foreign_keys) // 2, \
-            "Not enough indexes for foreign keys"
+        if len(indexes) < len(foreign_keys) // 2:
+            raise AssertionError("Not enough indexes for foreign keys")
 
 
 if __name__ == "__main__":

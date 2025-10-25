@@ -293,9 +293,13 @@ class AdvancedRateLimiter:
                     # Direct IP match
                     if str(ip) == whitelist_entry:
                         return True
-        except Exception:
-            pass
-        
+        except (ValueError, TypeError, AttributeError) as e:
+            # Ожидаемые ошибки при парсинге IP или сети
+            logger.warning("Ошибка при проверке whitelist для IP %s: %s", ip_address, e)
+        except Exception as e:
+            # Неожиданные ошибки логируем
+            logger.exception("Неожиданная ошибка в _is_whitelisted_ip: %s", e)
+
         return False
     
     async def _get_adaptive_multiplier(self) -> float:
@@ -323,9 +327,14 @@ class AdvancedRateLimiter:
                 multiplier *= 0.8
             
             return max(0.1, multiplier)  # Minimum 10% of original limits
-            
+
+        except (ValueError, TypeError, KeyError) as e:
+            # Ожидаемые ошибки при парсинге метрик
+            logger.debug("Ошибка при расчете adaptive multiplier: %s", e)
+            return 1.0
         except Exception as e:
-            logger.warning(f"Failed to calculate adaptive multiplier: {e}")
+            # Неожиданные ошибки логируем
+            logger.exception("Неожиданная ошибка в _get_adaptive_multiplier: %s", e)
             return 1.0
     
     async def _get_current_rps(self, redis_client: redis.Redis) -> float:
@@ -339,7 +348,13 @@ class AdvancedRateLimiter:
                 current_time
             )
             return count / 60.0
-        except Exception:
+        except (ValueError, TypeError) as e:
+            # Ожидаемые ошибки при работе с Redis
+            logger.debug("Ошибка при получении RPS: %s", e)
+            return 0.0
+        except Exception as e:
+            # Неожиданные ошибки логируем
+            logger.exception("Неожиданная ошибка в _get_current_rps: %s", e)
             return 0.0
     
     async def _get_error_rate(self, redis_client: redis.Redis) -> float:
@@ -355,7 +370,13 @@ class AdvancedRateLimiter:
                 return 0.0
             
             return float(errors) / float(total)
-        except Exception:
+        except (ValueError, TypeError, ZeroDivisionError) as e:
+            # Ожидаемые ошибки при расчете error rate
+            logger.debug("Ошибка при получении error rate: %s", e)
+            return 0.0
+        except Exception as e:
+            # Неожиданные ошибки логируем
+            logger.exception("Неожиданная ошибка в _get_error_rate: %s", e)
             return 0.0
     
     async def _check_single_limit(self, identifier: str, endpoint: str, method: str,

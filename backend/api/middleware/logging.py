@@ -302,9 +302,13 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                     })
             
             logger.info("Trading operation analytics", **analytics_data)
-            
+
+        except (ValueError, TypeError, KeyError) as e:
+            # Ожидаемые ошибки при парсинге данных для аналитики
+            logger.debug("Ошибка при логировании торговой аналитики: %s", e)
         except Exception as e:
-            logger.error(f"Failed to log trading analytics: {e}")
+            # Неожиданные ошибки явно логируем
+            logger.exception("Неожиданная ошибка в _log_trading_analytics: %s", e)
     
     def _get_client_ip(self, request: Request) -> str:
         """Получение IP адреса клиента"""
@@ -343,15 +347,20 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             if request.method in ["POST", "PUT", "PATCH"]:
                 # Попытка получить JSON
                 body = await request.json()
-                
+
                 # Маскировка чувствительных данных
                 if isinstance(body, dict):
                     return self._mask_sensitive_data(body)
                 return body
-        except Exception:
-            # Если не удалось распарсить JSON, возвращаем None
-            pass
-        
+        except (UnicodeDecodeError, ValueError) as e:
+            # Ожидаемые ошибки при парсинге тела запроса
+            logger.debug("Ошибка парсинга тела запроса: %s", e)
+            return None
+        except Exception as e:
+            # Неожиданные ошибки явно логируем и пробрасываем
+            logger.exception("Неожиданная ошибка в _get_safe_request_body: %s", e)
+            raise
+
         return None
     
     def _is_critical_operation(self, request: Request) -> bool:
