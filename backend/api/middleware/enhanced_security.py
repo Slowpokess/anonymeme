@@ -241,8 +241,17 @@ class AdvancedSecurityMiddleware(BaseHTTPMiddleware):
                     if threat_type:
                         await self._record_threat(client_ip, threat_type, "request_body")
                         raise SecurityException(f"Threat in request body: {threat_type}", f"BODY_THREAT_{threat_type.upper()}")
-            except Exception:
-                pass  # Continue if body can't be read
+            except (UnicodeDecodeError, ValueError, OSError) as exc:
+                # Конкретные ожидаемые исключения при чтении/декодировании тела запроса.
+                # Логируем детально и продолжаем работу middleware корректно.
+                logger.debug("Не удалось прочитать тело запроса: %s (%s)", exc, type(exc).__name__)
+            except SecurityException:
+                # Если наша проверка явно отметила угрозу - пробрасываем дальше.
+                raise
+            except Exception as exc:
+                # Неожиданные ошибки: логируем и пробрасываем, т.к. лучше упасть явно, чем подавить.
+                logger.exception("Неожиданная ошибка при чтении тела запроса: %s", exc)
+                raise
         
         # Check for honeypot access
         if request.url.path in self.honeypot_paths:

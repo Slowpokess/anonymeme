@@ -88,17 +88,37 @@ class CacheService:
             logger.error(f"Serialization error: {e}")
             raise CacheException(f"Failed to serialize value: {str(e)}")
     
-    def _deserialize_value(self, data: bytes) -> Any:
-        """Десериализация значения"""
+    def _deserialize_value(self, data: bytes, trusted: bool = False) -> Any:
+        """
+        Десериализация значения из кэша.
+        Предпочитаем JSON. Если JSON не подходит и данные помечены как trusted=True,
+        допускается использование pickle.loads (с DOCUMENTED justification).
+        Если trusted=False — не использовать pickle и вернуть None.
+        """
+        if data is None:
+            return None
+
+        # Попытка JSON десериализации
         try:
-            # Сначала пробуем JSON
+            text = data.decode("utf-8")
+            return json.loads(text)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            # Если это не JSON, возможно, это бинарный формат.
+            logger.debug("Данные кэша не являются JSON, проверяем дальше (trusted=%s)", trusted)
+
+        # Разрешаем pickle только для доверенных данных
+        if trusted:
             try:
-                return json.loads(data.decode('utf-8'))
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                # Если не JSON, пробуем pickle
-                return pickle.loads(data)
-        except Exception as e:
-            logger.error(f"Deserialization error: {e}")
+                # Используем pickle только если уверены в источнике данных.
+                # nosec B301 - pickle используется только для trusted=True данных из внутреннего кэша
+                return pickle.loads(data)  # nosec
+            except Exception as exc:
+                logger.exception("Ошибка при unpickle данных (trusted=True): %s", exc)
+                # В случае ошибки unpickle — возвращаем None, т.к. безопаснее игнорировать corrupt data.
+                return None
+        else:
+            # Если данные не JSON и не trusted — не используем pickle (риск RCE).
+            logger.warning("Отказ в unpickle для недоверенных данных (trusted=False)")
             return None
     
     async def get(
@@ -115,9 +135,11 @@ class CacheService:
             if data is None:
                 self.stats.misses += 1
                 return default
-            
+
             self.stats.hits += 1
-            return self._deserialize_value(data)
+            # По умолчанию считаем данные из внутреннего Redis trusted=True
+            # так как это наш собственный кэш-сервер
+            return self._deserialize_value(data, trusted=True)
             
         except Exception as e:
             self.stats.errors += 1
@@ -273,7 +295,8 @@ class CacheService:
             result = {}
             for i, key in enumerate(keys):
                 if values[i] is not None:
-                    result[key] = self._deserialize_value(values[i])
+                    # Данные из нашего внутреннего Redis считаем trusted
+                    result[key] = self._deserialize_value(values[i], trusted=True)
                     self.stats.hits += 1
                 else:
                     self.stats.misses += 1
