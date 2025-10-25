@@ -25,6 +25,8 @@ interface FormErrors {
   image?: string
 }
 
+type PresetType = 'conservative' | 'balanced' | 'aggressive' | 'custom'
+
 export default function CreateTokenPage() {
   const [mounted, setMounted] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -32,7 +34,8 @@ export default function CreateTokenPage() {
   const [errors, setErrors] = useState<FormErrors>({})
   const [step, setStep] = useState(1) // 1: Form, 2: Preview, 3: Success
   const [txSignature, setTxSignature] = useState<string | null>(null)
-  
+  const [preset, setPreset] = useState<PresetType>('balanced')
+
   const { connected } = useWallet()
 
   const [formData, setFormData] = useState<CreateTokenForm>({
@@ -410,20 +413,136 @@ export default function CreateTokenPage() {
             {/* Тип кривой */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Тип бондинг-кривой
+                Тип бондинг-кривой *
               </label>
               <select
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                 value={formData.curve_type}
                 onChange={(e) => handleInputChange('curve_type', e.target.value as CurveType)}
               >
-                <option value={CurveType.EXPONENTIAL}>Экспоненциальная (рекомендуется)</option>
-                <option value={CurveType.LINEAR}>Линейная</option>
-                <option value={CurveType.LOGARITHMIC}>Логарифмическая</option>
+                <option value={CurveType.LINEAR}>
+                  Линейная - Равномерный рост цены (начинающим)
+                </option>
+                <option value={CurveType.EXPONENTIAL}>
+                  Экспоненциальная - Быстрый рост цены (популярная)
+                </option>
+                <option value={CurveType.SIGMOID}>
+                  Сигмоидная - Плавный S-образный рост (сбалансированная)
+                </option>
+                <option value={CurveType.CONSTANT_PRODUCT}>
+                  Constant Product - Как Uniswap (продвинутая)
+                </option>
+                <option value={CurveType.LOGARITHMIC}>
+                  Логарифмическая - Замедляющийся рост (для стабильности)
+                </option>
               </select>
-              <p className="text-xs text-gray-500 mt-1">
-                Экспоненциальная кривая обеспечивает лучшую защиту от манипуляций
-              </p>
+
+              {/* Динамическое описание в зависимости от выбранной кривой */}
+              <div className="mt-2 p-3 bg-blue-50 rounded-md border border-blue-100">
+                <p className="text-xs text-blue-900">
+                  {formData.curve_type === CurveType.LINEAR && (
+                    <>
+                      <strong>Линейная:</strong> Цена растет равномерно с постоянной скоростью.
+                      Идеально для начинающих, предсказуемый рост без резких скачков.
+                    </>
+                  )}
+                  {formData.curve_type === CurveType.EXPONENTIAL && (
+                    <>
+                      <strong>Экспоненциальная:</strong> Цена растет экспоненциально быстрее с каждой покупкой.
+                      Популярный выбор для мемкоинов, обеспечивает защиту от манипуляций и создает FOMO эффект.
+                    </>
+                  )}
+                  {formData.curve_type === CurveType.SIGMOID && (
+                    <>
+                      <strong>Сигмоидная:</strong> S-образная кривая - медленный старт, быстрый средний рост, плавное замедление.
+                      Сбалансированный выбор для долгосрочных проектов с контролируемой волатильностью.
+                    </>
+                  )}
+                  {formData.curve_type === CurveType.CONSTANT_PRODUCT && (
+                    <>
+                      <strong>Constant Product:</strong> Работает как Uniswap (x × y = k).
+                      Продвинутый вариант с автоматическим балансированием ликвидности, подходит для опытных создателей.
+                    </>
+                  )}
+                  {formData.curve_type === CurveType.LOGARITHMIC && (
+                    <>
+                      <strong>Логарифмическая:</strong> Быстрый рост в начале, затем постепенное замедление.
+                      Идеальна для стабильных токенов с контролируемой инфляцией и защитой от pump & dump.
+                    </>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            {/* Пресет параметров */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Пресет параметров *
+              </label>
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                <button
+                  type="button"
+                  onClick={() => setPreset('conservative')}
+                  className={`px-4 py-3 rounded-lg border-2 transition-all ${
+                    preset === 'conservative'
+                      ? 'border-blue-500 bg-blue-50 text-blue-900'
+                      : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                  }`}
+                >
+                  <div className="text-sm font-semibold">Консервативный</div>
+                  <div className="text-xs mt-1">Медленный рост</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPreset('balanced')}
+                  className={`px-4 py-3 rounded-lg border-2 transition-all ${
+                    preset === 'balanced'
+                      ? 'border-blue-500 bg-blue-50 text-blue-900'
+                      : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                  }`}
+                >
+                  <div className="text-sm font-semibold">Сбалансированный</div>
+                  <div className="text-xs mt-1">Средний рост ⭐</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPreset('aggressive')}
+                  className={`px-4 py-3 rounded-lg border-2 transition-all ${
+                    preset === 'aggressive'
+                      ? 'border-blue-500 bg-blue-50 text-blue-900'
+                      : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                  }`}
+                >
+                  <div className="text-sm font-semibold">Агрессивный</div>
+                  <div className="text-xs mt-1">Быстрый рост</div>
+                </button>
+              </div>
+
+              {/* Описание пресета */}
+              <div className="mt-2 p-3 bg-gray-50 rounded-md border border-gray-200">
+                <p className="text-xs text-gray-700">
+                  {preset === 'conservative' && (
+                    <>
+                      <strong>Консервативный:</strong> Низкая начальная цена, медленный рост.
+                      Подходит для проектов с долгосрочной перспективой и минимальной спекуляцией.
+                    </>
+                  )}
+                  {preset === 'balanced' && (
+                    <>
+                      <strong>Сбалансированный (рекомендуется):</strong> Средняя начальная цена, умеренный рост.
+                      Оптимальный выбор для большинства мемкоинов - баланс между доступностью и ростом.
+                    </>
+                  )}
+                  {preset === 'aggressive' && (
+                    <>
+                      <strong>Агрессивный:</strong> Высокая начальная цена, быстрый рост.
+                      Для опытных создателей - создает сильный FOMO эффект, но может отпугнуть новых покупателей.
+                    </>
+                  )}
+                </p>
+              </div>
             </div>
 
             {/* Социальные ссылки */}

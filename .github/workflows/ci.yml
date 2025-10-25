@@ -190,6 +190,16 @@ jobs:
             # Check if Anchor.toml exists
             if [ -f "Anchor.toml" ]; then
               anchor build
+
+              # Display build artifacts
+              echo "✅ Build completed successfully!"
+              ls -lh target/deploy/
+
+              # Show program ID
+              if [ -f "target/deploy/pump_core-keypair.json" ]; then
+                PROGRAM_ID=$(solana-keygen pubkey target/deploy/pump_core-keypair.json)
+                echo "Program ID: $PROGRAM_ID"
+              fi
             else
               echo "⚠️ Anchor.toml not found, trying cargo build"
               cargo build --release
@@ -197,7 +207,18 @@ jobs:
           else
             echo "⚠️ Smart contracts directory not found, skipping build"
           fi
-          
+
+      - name: 📤 Upload Contract Build Artifacts
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: pump-core-artifacts-${{ github.sha }}
+          path: |
+            contracts/pump-core/target/deploy/pump_core.so
+            contracts/pump-core/target/deploy/pump_core-keypair.json
+            contracts/pump-core/target/idl/pump_core.json
+          retention-days: 30
+
       - name: 🧪 Run Smart Contract Tests
         id: test-contracts
         run: |

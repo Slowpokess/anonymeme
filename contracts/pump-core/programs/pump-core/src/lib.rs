@@ -129,6 +129,34 @@ pub mod pump_core {
     ) -> Result<()> {
         instructions::transfer_admin(ctx, reason)
     }
+
+    // === LP TOKEN LOCK МЕХАНИЗМ ===
+
+    /// 🔒 Блокировка LP токенов с таймлоком для защиты от rug pulls
+    pub fn lock_lp_tokens(
+        ctx: Context<LockLpTokens>,
+        lp_amount: u64,
+        lock_duration: i64,
+        enable_vesting: bool,
+    ) -> Result<()> {
+        instructions::lock_lp_tokens(ctx, lp_amount, lock_duration, enable_vesting)
+    }
+
+    /// 🔓 Разблокировка LP токенов после истечения срока блокировки
+    pub fn unlock_lp_tokens(
+        ctx: Context<UnlockLpTokens>,
+        amount: u64,
+    ) -> Result<()> {
+        instructions::unlock_lp_tokens(ctx, amount)
+    }
+
+    /// ⏱️ Продление срока блокировки LP токенов
+    pub fn extend_lock(
+        ctx: Context<ExtendLock>,
+        additional_duration: i64,
+    ) -> Result<()> {
+        instructions::extend_lock(ctx, additional_duration)
+    }
 }
 
 #[cfg(test)]

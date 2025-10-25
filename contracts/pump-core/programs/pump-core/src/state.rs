@@ -293,6 +293,33 @@ pub struct DexListing {
     pub bump: u8,
 }
 
+// 🔒 Информация о блокировке LP токенов
+#[account]
+pub struct LpTokenLock {
+    pub owner: Pubkey,                      // Владелец LP токенов
+    pub lp_mint: Pubkey,                    // Mint LP токенов
+    pub token_mint: Pubkey,                 // Mint основного токена
+    pub lp_vault: Pubkey,                   // Хранилище LP токенов (PDA)
+    pub locked_amount: u64,                 // Заблокированное количество
+    pub unlocked_amount: u64,               // Уже разблокированное количество
+    pub lock_start: i64,                    // Время начала блокировки
+    pub lock_end: i64,                      // Время окончания блокировки
+    pub is_locked: bool,                    // Статус блокировки
+    pub vesting_enabled: bool,              // Включен ли постепенный vesting
+    pub last_unlock_time: i64,              // Время последней разблокировки
+    pub bump: u8,
+}
+
+impl LpTokenLock {
+    pub const SEED: &'static str = "lp_token_lock";
+
+    /// Размер аккаунта в байтах
+    /// 8 (discriminator) + 32 (owner) + 32 (lp_mint) + 32 (token_mint) + 32 (lp_vault)
+    /// + 8 (locked_amount) + 8 (unlocked_amount) + 8 (lock_start) + 8 (lock_end)
+    /// + 1 (is_locked) + 1 (vesting_enabled) + 8 (last_unlock_time) + 1 (bump)
+    pub const ACCOUNT_SIZE: usize = 8 + 32 + 32 + 32 + 32 + 8 + 8 + 8 + 8 + 1 + 1 + 8 + 1;
+}
+
 // 📈 Исторические данные цен (для графиков)
 #[account]
 pub struct PriceHistory {
