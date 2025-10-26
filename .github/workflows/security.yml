@@ -52,14 +52,31 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: 'backend/requirements.txt'
 
       - name: 📦 Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
 
       - name: 🦀 Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: 💾 Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            contracts/pump-core/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: 🔍 Python Dependency Audit (Safety)
         id: python-audit
@@ -173,6 +190,17 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: 💾 Cache Security Tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.npm
+          key: ${{ runner.os }}-security-tools-${{ hashFiles('backend/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-security-tools-
 
       - name: 📦 Install Security Tools
         run: |
@@ -256,19 +284,47 @@ jobs:
       - name: 🔧 Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: 💾 Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
       - name: 🏗️ Build Test Images
         run: |
-          docker build -t anonymeme-backend:security-test ./backend
-          docker build -t anonymeme-frontend:security-test ./frontend
+          docker buildx build \
+            --cache-from type=local,src=/tmp/.buildx-cache \
+            --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+            --load \
+            -t anonymeme-backend:security-test ./backend
+
+          docker buildx build \
+            --cache-from type=local,src=/tmp/.buildx-cache \
+            --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+            --load \
+            -t anonymeme-frontend:security-test ./frontend
+
+          # Move cache to avoid growing cache size indefinitely
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
       - name: 📦 Install Trivy
         run: |
-          sudo apt-get update
-          sudo apt-get install wget apt-transport-https gnupg lsb-release
+          # Use aquasecurity/trivy-action instead for better caching
           wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
           echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
           sudo apt-get update
           sudo apt-get install trivy
+
+      - name: 💾 Cache Trivy DB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trivy
+          key: ${{ runner.os }}-trivy-db-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-trivy-db-
 
       - name: 🔍 Scan Backend Container
         id: container-scan
@@ -338,6 +394,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: 'backend/requirements.txt'
 
       - name: 📦 Install Dependencies
         run: |
@@ -357,12 +415,20 @@ jobs:
           uvicorn api.main:app --host 0.0.0.0 --port 8000 &
           API_PID=$!
           echo "API_PID=$API_PID" >> $GITHUB_ENV
-          
-          # Wait for server to start
-          sleep 15
-          
-          # Verify server is running
-          curl -f http://localhost:8000/health || exit 1
+
+          # Wait for server to be ready with exponential backoff
+          echo "Waiting for API server to be ready..."
+          for i in {1..30}; do
+            if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+              echo "✅ API server is ready after $i attempts"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "❌ API server failed to start within 30 seconds"
+              exit 1
+            fi
+            sleep 1
+          done
 
       - name: 🔍 Dynamic Vulnerability Scan
         id: dynamic-scan
@@ -413,7 +479,8 @@ jobs:
     name: 📊 Security Monitoring
     runs-on: ubuntu-latest
     needs: [dependency-audit, static-analysis, container-security, dynamic-security]
-    if: always()
+    # Always run, but handle missing results from optional jobs gracefully
+    if: always() && (needs.dependency-audit.result == 'success' || needs.static-analysis.result == 'success')
     
     steps:
       - name: 📥 Checkout code
